@@ -1,8 +1,16 @@
 use std::fs;
+use std::path::Path;
 
 pub fn read_file(args: Vec<&str>) {
     if args.len() < 2 {
         println!("Usage: read <file>");
+        return;
+    }
+
+    let file_path = Path::new(args[1]);
+
+    if !file_path.exists() {
+        println!("The file does not exist");
         return;
     }
 
@@ -18,6 +26,13 @@ pub fn get_file_type(args: Vec<&str>) {
         return;
     }
 
+    let file_path = Path::new(args[1]);
+
+    if !file_path.exists() {
+        println!("The file does not exist");
+        return;
+    }
+
     match fs::metadata(args[1]) {
         Ok(metadata) => {
             println!("{:?}", metadata.file_type());
@@ -29,6 +44,13 @@ pub fn get_file_type(args: Vec<&str>) {
 pub fn read_entries(args: Vec<&str>) {
     if args.len() < 2 {
         println!("Usage: read_entries <folder path>");
+        return;
+    }
+
+    let file_path = Path::new(args[1]);
+
+    if !file_path.exists() {
+        println!("The directory does not exist");
         return;
     }
 

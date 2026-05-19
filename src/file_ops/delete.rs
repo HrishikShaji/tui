@@ -1,8 +1,15 @@
-use std::fs;
+use std::{fs, path::Path};
 
 pub fn delete_file(args: Vec<&str>) {
     if args.len() < 2 {
         println!("Usage: delete <file>");
+        return;
+    }
+
+    let file_path = Path::new(args[1]);
+
+    if !file_path.exists() {
+        println!("The file does not exist");
         return;
     }
 
