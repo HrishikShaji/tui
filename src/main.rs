@@ -34,6 +34,9 @@ fn main() {
             println!("  read_entries <path>");
             println!("  compress_file <source> <target>");
             println!("  decompress_file <source>");
+            println!("  full_path <path>");
+            println!("  copy_file <source> <target");
+            println!("  copy_and_replace_file <source> <target");
             continue;
         }
 
@@ -49,6 +52,9 @@ fn main() {
             "read_entries" => file_ops::read::read_entries(parts),
             "compress_file" => file_ops::compress::compress_file(parts),
             "decompress_file" => file_ops::compress::decompress_file(parts),
+            "full_path" => file_ops::read::full_path(parts),
+            "copy_file" => file_ops::create::copy_file(parts),
+            "copy_and_replace_file" => file_ops::create::copy_and_replace_file(parts),
 
             _ => {
                 println!("Unknown command");

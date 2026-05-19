@@ -1,6 +1,20 @@
 use std::fs;
 use std::path::Path;
 
+pub fn full_path(args: Vec<&str>) {
+    if args.len() < 2 {
+        println!("Usage: full_path <path>");
+        return;
+    }
+
+    match fs::canonicalize(args[1]) {
+        Ok(path) => println!("Full Path : {:?}", path),
+        Err(e) => {
+            println!("Invalid Path: {}", e)
+        }
+    }
+}
+
 pub fn read_file(args: Vec<&str>) {
     if args.len() < 2 {
         println!("Usage: read <file>");
