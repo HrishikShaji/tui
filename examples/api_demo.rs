@@ -1,6 +1,6 @@
 use std::io::Read;
 
-pub fn fetch_api() -> anyhow::Result<()> {
+fn main() -> anyhow::Result<()> {
     let mut res = reqwest::blocking::get("https://httpbin.org/get")?;
 
     let mut body = String::new();

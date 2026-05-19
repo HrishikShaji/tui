@@ -757,6 +757,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f1f227452a390804cdb637b74a86990f2a7d7ba4b7d5693aac9b4dd6defd8d6"
 
 [[package]]
+name = "filemanager"
+version = "0.1.0"
+dependencies = [
+ "actix-web",
+ "anyhow",
+ "csv",
+ "error-chain",
+ "flate2",
+ "reqwest",
+ "rhai",
+ "select",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "zip",
+]
+
+[[package]]
 name = "find-msvc-tools"
 version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1860,25 +1879,6 @@ name = "rand_core"
 version = "0.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63b8176103e19a2643978565ca18b50549f6101881c443590420e4dc998a3c69"
-
-[[package]]
-name = "read-csv"
-version = "0.1.0"
-dependencies = [
- "actix-web",
- "anyhow",
- "csv",
- "error-chain",
- "flate2",
- "reqwest",
- "rhai",
- "select",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "zip",
-]
 
 [[package]]
 name = "redox_syscall"

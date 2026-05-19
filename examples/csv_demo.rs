@@ -1,7 +1,6 @@
-use csv;
 use std::error::Error;
 
-pub fn read_csv_file() {
+fn main() {
     if let Err(e) = read_from_file("./agreement.csv") {
         eprintln!("{}", e);
     }
@@ -12,7 +11,6 @@ fn read_from_file(path: &str) -> Result<(), Box<dyn Error>> {
 
     for result in reader.records() {
         let record = result?;
-
         println!("{:?}", record);
     }
 

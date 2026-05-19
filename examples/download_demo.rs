@@ -2,7 +2,8 @@ use std::fs::File;
 use std::io::copy;
 use tempfile::Builder;
 
-pub async fn download_image() {
+#[tokio::main]
+async fn main() {
     let temp_dir = match Builder::new().prefix("example").tempdir() {
         Ok(dir) => dir,
         Err(e) => {

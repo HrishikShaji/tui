@@ -12,8 +12,9 @@ struct Article {
     paragraph: Vec<Paragraph>,
 }
 
-pub fn create_json() {
-    let new_article: Article = Article {
+fn main() {
+    // Create JSON
+    let new_article = Article {
         article: String::from("How to write rust"),
         author: String::from("shaji"),
         paragraph: vec![
@@ -25,13 +26,10 @@ pub fn create_json() {
             },
         ],
     };
-
     let new_json = serde_json::to_string(&new_article).unwrap();
-
     println!("The created json is {:?}", new_json);
-}
 
-pub fn parse_json() {
+    // Parse JSON
     let json = r#"
     {
     "article":"how to learn rust",
@@ -46,15 +44,9 @@ pub fn parse_json() {
     ]
     }
     "#;
-
-    let parsed: Article = read_json_typed(json);
-
+    let parsed: Article = serde_json::from_str(json).unwrap();
     println!(
         "\n\n The name of first paragraph is :{}",
         parsed.paragraph[0].name
     );
-}
-
-fn read_json_typed(raw_json: &str) -> Article {
-    serde_json::from_str(raw_json).unwrap()
 }

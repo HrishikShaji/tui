@@ -1,14 +1,14 @@
 use select::document::Document;
 use select::predicate::Name;
 
-pub async fn scrape_site() {
-    // let res =  reqwest::get("https://rust-lang.org/").await?.text().await?;
+#[tokio::main]
+async fn main() {
     let res = match reqwest::get("https://rust-lang.org/").await {
         Ok(body) => match body.text().await {
             Ok(text) => text,
-            Err(err) => return,
+            Err(_err) => return,
         },
-        Err(err) => return,
+        Err(_err) => return,
     };
 
     Document::from(res.as_str())
