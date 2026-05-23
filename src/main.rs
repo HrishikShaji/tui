@@ -1,13 +1,75 @@
 mod download;
 mod error;
 mod file_ops;
+mod http;
 
 use std::io::{self, Write};
 
-fn main() {
+struct Command {
+    name: String,
+    usage: String,
+}
+
+#[tokio::main]
+async fn main() {
     println!("Filemanager CLI");
     println!("Type 'help' for commands");
     println!("Type 'exit' to quit");
+
+    let commands: Vec<Command> = vec![
+        Command {
+            name: String::from("create"),
+            usage: String::from("create <file>"),
+        },
+        Command {
+            name: String::from("write"),
+            usage: String::from("write <file> <content>"),
+        },
+        Command {
+            name: String::from("read"),
+            usage: String::from("read <file>"),
+        },
+        Command {
+            name: String::from("delete"),
+            usage: String::from("delete <file>"),
+        },
+        Command {
+            name: String::from("file_type"),
+            usage: String::from("file_type <file>"),
+        },
+        Command {
+            name: String::from("create_directory"),
+            usage: String::from("create_directory <directory>"),
+        },
+        Command {
+            name: String::from("read_entries"),
+            usage: String::from("read_entries <path>"),
+        },
+        Command {
+            name: String::from("compress_file"),
+            usage: String::from("compress_file <source> <target>"),
+        },
+        Command {
+            name: String::from("decompress_file"),
+            usage: String::from("decompress_file <source>"),
+        },
+        Command {
+            name: String::from("full_path"),
+            usage: String::from("full_path <path>"),
+        },
+        Command {
+            name: String::from("copy_file"),
+            usage: String::from("copy_file <source> <target"),
+        },
+        Command {
+            name: String::from("copy_and_replace_file"),
+            usage: String::from("copy_and_replace_file <source> <target"),
+        },
+        Command {
+            name: String::from("get"),
+            usage: String::from("get <url>"),
+        },
+    ];
 
     loop {
         print!("> ");
@@ -25,18 +87,9 @@ fn main() {
 
         if input == "help" {
             println!("Commands:");
-            println!("  create <file>");
-            println!("  write <file> <content>");
-            println!("  read <file>");
-            println!("  delete <file>");
-            println!("  file_type <file>");
-            println!("  create_directory <directory>");
-            println!("  read_entries <path>");
-            println!("  compress_file <source> <target>");
-            println!("  decompress_file <source>");
-            println!("  full_path <path>");
-            println!("  copy_file <source> <target");
-            println!("  copy_and_replace_file <source> <target");
+            for command in &commands {
+                println!("{}", command.name);
+            }
             continue;
         }
 
@@ -55,6 +108,7 @@ fn main() {
             "full_path" => file_ops::read::full_path(parts),
             "copy_file" => file_ops::create::copy_file(parts),
             "copy_and_replace_file" => file_ops::create::copy_and_replace_file(parts),
+            "get" => http::get::get(parts).await,
 
             _ => {
                 println!("Unknown command");
