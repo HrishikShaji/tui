@@ -2,6 +2,7 @@ mod download;
 mod error;
 mod file_ops;
 mod http;
+mod utils;
 
 use std::io::{self, Write};
 

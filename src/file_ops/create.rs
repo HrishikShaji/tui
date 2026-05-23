@@ -1,5 +1,8 @@
+use crate::utils::check_confirmation;
+
 use std::fs;
 use std::fs::DirBuilder;
+use std::io::{self, Write};
 use std::path::Path;
 
 pub fn copy_file(args: Vec<&str>) {
@@ -47,6 +50,10 @@ pub fn copy_and_replace_file(args: Vec<&str>) {
 }
 
 pub fn create_file(args: Vec<&str>) {
+    if !check_confirmation() {
+        return;
+    }
+
     if args.len() < 2 {
         println!("Usage: create <file>");
         return;
