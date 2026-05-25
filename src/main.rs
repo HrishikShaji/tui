@@ -1,3 +1,4 @@
+mod commands;
 mod download;
 mod error;
 mod file_ops;
@@ -70,6 +71,10 @@ async fn main() {
             name: String::from("get"),
             usage: String::from("get <url>"),
         },
+        Command {
+            name: String::from("ip_address"),
+            usage: String::from("ip_address <version>"),
+        },
     ];
 
     loop {
@@ -110,6 +115,7 @@ async fn main() {
             "copy_file" => file_ops::create::copy_file(parts),
             "copy_and_replace_file" => file_ops::create::copy_and_replace_file(parts),
             "get" => http::get::get(parts).await,
+            "ip_address" => commands::system::get_ip_address(parts),
 
             _ => {
                 println!("Unknown command");
