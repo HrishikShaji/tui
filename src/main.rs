@@ -5,6 +5,7 @@ mod error;
 mod file_ops;
 mod http;
 mod utils;
+mod voice;
 
 use std::io::{self, Write};
 
@@ -94,6 +95,10 @@ async fn main() {
 
         if input == "exit" {
             break;
+        }
+
+        if input == "voice" {
+            voice::local::record_and_play();
         }
 
         if input == "help" {
