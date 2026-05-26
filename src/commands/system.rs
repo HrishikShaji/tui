@@ -11,7 +11,7 @@ struct NetworkAdapter {
     media_state: Option<String>,
 }
 
-pub fn get_ip_address(args: Vec<&str>) {
+pub fn get_ip_address(args: Vec<String>) {
     match Command::new("ipconfig").output() {
         Ok(output) => {
             let stdout = String::from_utf8_lossy(&output.stdout);

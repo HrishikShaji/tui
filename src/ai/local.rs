@@ -42,8 +42,8 @@ impl Tool for Adder {
         Ok(args.x + args.y)
     }
 }
-pub async fn call_agent(args: Vec<&str>) {
-    let prompt = args[1];
+pub async fn call_agent(args: Vec<String>) {
+    let prompt = &args[1];
     let model = "llama3.2";
     let base_url = "http://localhost:11434";
 

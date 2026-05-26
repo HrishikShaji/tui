@@ -7,15 +7,15 @@ use std::io::BufReader;
 use std::io::copy;
 use std::time::Instant;
 
-pub fn compress_file(args: Vec<&str>) {
+pub fn compress_file(args: Vec<String>) {
     if args.len() < 3 {
         eprintln!("Usage: compress_file <source> <target>");
         return;
     }
 
-    let mut input = BufReader::new(File::open(args[1]).unwrap());
+    let mut input = BufReader::new(File::open(&args[1]).unwrap());
 
-    let output = File::create(args[2]).unwrap();
+    let output = File::create(&args[2]).unwrap();
 
     let mut encoder = GzEncoder::new(output, Compression::default());
 
@@ -35,7 +35,7 @@ pub fn compress_file(args: Vec<&str>) {
     println!("Elapsed time: {:?}", start.elapsed());
 }
 
-pub fn decompress_file(args: Vec<&str>) {
+pub fn decompress_file(args: Vec<String>) {
     if args.len() < 2 {
         eprintln!("Usage: decompress_file <source>");
         return;
