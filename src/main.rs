@@ -1,3 +1,4 @@
+mod ai;
 mod commands;
 mod download;
 mod error;
@@ -75,6 +76,10 @@ async fn main() {
             name: String::from("ip_address"),
             usage: String::from("ip_address <version>"),
         },
+        Command {
+            name: String::from("ai"),
+            usage: String::from("ai <query>"),
+        },
     ];
 
     loop {
@@ -116,7 +121,7 @@ async fn main() {
             "copy_and_replace_file" => file_ops::create::copy_and_replace_file(parts),
             "get" => http::get::get(parts).await,
             "ip_address" => commands::system::get_ip_address(parts),
-
+            "ai" => ai::local::call_agent(parts).await,
             _ => {
                 println!("Unknown command");
             }
