@@ -36,6 +36,10 @@ async fn main() {
             voice::local::record_and_play();
         }
 
+        if input == "tts" {
+            voice::tts::generate_voice();
+        }
+
         if input == "help" {
             println!("Commands:");
 
