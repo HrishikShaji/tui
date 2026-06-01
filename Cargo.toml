@@ -18,6 +18,8 @@ hound = "3.5"
 rodio = "0.20"
 tokenizers = "0.19"
 sherpa-onnx = "1.13.2"
+crossbeam-channel = "0.5"
+rubato = "0.15"
 
 [dev-dependencies]
 actix-web = "4.13.0"
