@@ -36,8 +36,15 @@ async fn main() {
             voice::local::record_and_play();
         }
 
+        if input == "llm" {}
+
         if input == "tts" {
-            voice::tts::generate_voice();
+            // voice::tts::generate_voice();
+        }
+
+        if input == "stt" {
+            // voice::stt::listen_and_transcribe();
+            voice::stt::transcribe();
         }
 
         if input == "help" {
