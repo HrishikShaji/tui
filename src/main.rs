@@ -32,6 +32,10 @@ async fn main() {
             break;
         }
 
+        if input == "agent" {
+            voice::agent::agent().await;
+        }
+
         if input == "voice" {
             voice::local::record_and_play();
         }

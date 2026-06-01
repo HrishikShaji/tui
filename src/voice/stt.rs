@@ -213,7 +213,7 @@ fn microphone_stream() -> Result<(cpal::Stream, Receiver<Vec<f32>>)> {
     Ok((stream, rx))
 }
 
-fn to_mono(input: &[f32], channels: usize) -> Vec<f32> {
+pub fn to_mono(input: &[f32], channels: usize) -> Vec<f32> {
     if channels == 1 {
         return input.to_vec();
     }
