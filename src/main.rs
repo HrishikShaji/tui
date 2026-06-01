@@ -40,6 +40,7 @@ async fn main() {
 
         if input == "tts" {
             // voice::tts::generate_voice();
+            voice::tts::speak();
         }
 
         if input == "stt" {
