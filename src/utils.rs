@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::path::PathBuf;
 
 pub fn check_confirmation() -> bool {
     print!(">> yes or no ");
@@ -10,17 +11,26 @@ pub fn check_confirmation() -> bool {
     input.trim() == "yes"
 }
 
-pub fn model_path(file: &str) -> String {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("models")
-        .join(file)
-        .to_string_lossy()
-        .to_string()
+pub fn models_dir() -> PathBuf {
+    #[cfg(debug_assertions)]
+    {
+        // Development:
+        // project/models
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("models")
+    }
+
+    #[cfg(not(debug_assertions))]
+    {
+        // Release:
+        // beside executable
+        let exe = std::env::current_exe().expect("failed to get executable path");
+
+        exe.parent()
+            .expect("failed to get executable directory")
+            .join("models")
+    }
 }
 
-pub fn models_dir() -> String {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("models")
-        .to_string_lossy()
-        .to_string()
+pub fn model_path(file: &str) -> String {
+    models_dir().join(file).to_string_lossy().to_string()
 }
