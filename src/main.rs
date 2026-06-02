@@ -42,6 +42,10 @@ async fn main() {
 
         if input == "llm" {}
 
+        if input == "stream" {
+            voice::streaming_agent::agent().await;
+        }
+
         if input == "tts" {
             // voice::tts::generate_voice();
             voice::tts::speak();
