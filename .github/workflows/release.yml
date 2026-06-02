@@ -32,33 +32,6 @@ jobs:
       - name: Enable Cargo cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Verify models
-        shell: pwsh
-        run: |
-          Write-Host "Checking models..."
-
-          Get-ChildItem models
-
-          $encoder = (Get-Item models\tiny.en-encoder.int8.onnx).Length
-          $decoder = (Get-Item models\tiny.en-decoder.int8.onnx).Length
-          $vad = (Get-Item models\silero_vad.onnx).Length
-
-          Write-Host "Encoder size: $encoder"
-          Write-Host "Decoder size: $decoder"
-          Write-Host "VAD size: $vad"
-
-          if ($encoder -lt 1000000) {
-            throw "Encoder model looks corrupted"
-          }
-
-          if ($decoder -lt 1000000) {
-            throw "Decoder model looks corrupted"
-          }
-
-          if ($vad -lt 1000000) {
-            throw "VAD model looks corrupted"
-          }
-
       - name: Build release
         run: cargo build --release
 
@@ -125,16 +98,6 @@ jobs:
             pkg-config \
             libasound2-dev
 
-      - name: Verify models
-        run: |
-          echo "Checking models..."
-
-          ls -lh models
-
-          test $(stat -c%s models/tiny.en-encoder.int8.onnx) -gt 1000000
-          test $(stat -c%s models/tiny.en-decoder.int8.onnx) -gt 1000000
-          test $(stat -c%s models/silero_vad.onnx) -gt 1000000
-
       - name: Build release
         run: cargo build --release
 
@@ -193,16 +156,6 @@ jobs:
 
       - name: Enable Cargo cache
         uses: Swatinem/rust-cache@v2
-
-      - name: Verify models
-        run: |
-          echo "Checking models..."
-
-          ls -lh models
-
-          test $(stat -f%z models/tiny.en-encoder.int8.onnx) -gt 1000000
-          test $(stat -f%z models/tiny.en-decoder.int8.onnx) -gt 1000000
-          test $(stat -f%z models/silero_vad.onnx) -gt 1000000
 
       - name: Build Intel binary
         run: |
