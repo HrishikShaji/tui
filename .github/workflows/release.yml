@@ -1,0 +1,129 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  BIN_NAME: tui 
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+
+          # Ubuntu
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: tar.gz
+
+          # Raspberry Pi 64-bit
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            archive: tar.gz
+
+          # Android ARM64 (Termux)
+          - os: ubuntu-latest
+            target: aarch64-linux-android
+            archive: tar.gz
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: cross build --release --target ${{ matrix.target }}
+
+      - name: Package Linux/Android
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir dist
+          cp target/${{ matrix.target }}/release/${{ env.BIN_NAME }} dist/
+
+          tar -czf \
+            ${BIN_NAME}-${{ matrix.target }}.tar.gz \
+            -C dist .
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          mkdir dist
+          copy target\${{ matrix.target }}\release\${env:BIN_NAME}.exe dist\
+
+          Compress-Archive `
+            -Path dist\* `
+            -DestinationPath ${env:BIN_NAME}-${{ matrix.target }}.zip
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.zip
+            *.tar.gz
+
+  macos-universal:
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: |
+            x86_64-apple-darwin
+            aarch64-apple-darwin
+
+      - name: Build Intel
+        run: |
+          cargo build \
+            --release \
+            --target x86_64-apple-darwin
+
+      - name: Build Apple Silicon
+        run: |
+          cargo build \
+            --release \
+            --target aarch64-apple-darwin
+
+      - name: Create Universal Binary
+        run: |
+          mkdir -p universal
+
+          lipo -create \
+            target/x86_64-apple-darwin/release/${BIN_NAME} \
+            target/aarch64-apple-darwin/release/${BIN_NAME} \
+            -output universal/${BIN_NAME}
+
+      - name: Package
+        run: |
+          tar -czf \
+            ${BIN_NAME}-universal-apple-darwin.tar.gz \
+            -C universal .
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
