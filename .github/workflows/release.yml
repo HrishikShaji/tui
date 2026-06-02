@@ -1,3 +1,4 @@
+```yaml
 name: Release
 
 on:
@@ -9,7 +10,7 @@ permissions:
   contents: write
 
 env:
-  BIN_NAME: tui # CHANGE THIS
+  BIN_NAME: tui
 
 jobs:
   windows:
@@ -17,28 +18,48 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Build
+      - name: Enable cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release
         run: cargo build --release
 
-      - name: Package
+      - name: Create release bundle
         shell: pwsh
         run: |
-          mkdir dist
+          mkdir release
+
+          mkdir release\${env:BIN_NAME}
 
           Copy-Item `
             target\release\${env:BIN_NAME}.exe `
-            dist\
+            release\${env:BIN_NAME}\
+
+          Copy-Item `
+            models `
+            release\${env:BIN_NAME}\models `
+            -Recurse
+
+          if (Test-Path README.md) {
+            Copy-Item README.md release\${env:BIN_NAME}\
+          }
+
+          if (Test-Path LICENSE) {
+            Copy-Item LICENSE release\${env:BIN_NAME}\
+          }
 
           Compress-Archive `
-            -Path dist\* `
+            -Path release\${env:BIN_NAME}\* `
             -DestinationPath `
             ${env:BIN_NAME}-windows-x64.zip
 
-      - name: Upload
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -49,11 +70,16 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
 
-      - name: Install dependencies
+      - name: Enable cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
         run: |
           sudo apt update
 
@@ -61,20 +87,36 @@ jobs:
             pkg-config \
             libasound2-dev
 
-      - name: Build
+      - name: Build release
         run: cargo build --release
 
-      - name: Package
-        run: |
-          mkdir dist
+      - name: Strip binary
+        run: strip target/release/${BIN_NAME}
 
-          cp target/release/${BIN_NAME} dist/
+      - name: Create release bundle
+        run: |
+          mkdir -p release/${BIN_NAME}
+
+          cp target/release/${BIN_NAME} \
+            release/${BIN_NAME}/
+
+          cp -r models \
+            release/${BIN_NAME}/models
+
+          if [ -f README.md ]; then
+            cp README.md release/${BIN_NAME}/
+          fi
+
+          if [ -f LICENSE ]; then
+            cp LICENSE release/${BIN_NAME}/
+          fi
 
           tar -czf \
             ${BIN_NAME}-linux-x64.tar.gz \
-            -C dist .
+            -C release \
+            ${BIN_NAME}
 
-      - name: Upload
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -85,43 +127,66 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
         with:
           targets: |
             x86_64-apple-darwin
             aarch64-apple-darwin
 
-      - name: Build Intel
+      - name: Enable cargo cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build Intel binary
         run: |
           cargo build \
             --release \
             --target x86_64-apple-darwin
 
-      - name: Build Apple Silicon
+      - name: Build Apple Silicon binary
         run: |
           cargo build \
             --release \
             --target aarch64-apple-darwin
 
-      - name: Create Universal Binary
+      - name: Create universal binary
         run: |
-          mkdir universal
+          mkdir -p universal/${BIN_NAME}
 
           lipo -create \
             target/x86_64-apple-darwin/release/${BIN_NAME} \
             target/aarch64-apple-darwin/release/${BIN_NAME} \
-            -output universal/${BIN_NAME}
+            -output universal/${BIN_NAME}/${BIN_NAME}
 
-      - name: Package
+      - name: Strip binary
+        run: strip universal/${BIN_NAME}/${BIN_NAME}
+
+      - name: Copy assets
+        run: |
+          cp -r models \
+            universal/${BIN_NAME}/models
+
+          if [ -f README.md ]; then
+            cp README.md universal/${BIN_NAME}/
+          fi
+
+          if [ -f LICENSE ]; then
+            cp LICENSE universal/${BIN_NAME}/
+          fi
+
+      - name: Create archive
         run: |
           tar -czf \
             ${BIN_NAME}-macos-universal.tar.gz \
-            -C universal .
+            -C universal \
+            ${BIN_NAME}
 
-      - name: Upload
+      - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
             *.tar.gz
+```

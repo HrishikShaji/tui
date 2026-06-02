@@ -25,10 +25,21 @@ pub async fn agent() {
     // BUILD WHISPER RECOGNIZER
     // =========================================
     println!("[agent] Initializing speech recognizer...");
+    println!(
+        "tokens path: {}",
+        crate::utils::model_path("tiny.en-tokens.txt")
+    );
+
+    println!(
+        "exists: {}",
+        std::path::Path::new(&crate::utils::model_path("tiny.en-tokens.txt")).exists()
+    );
+
+    println!("cwd: {:?}", std::env::current_dir().unwrap());
 
     let whisper_config = OfflineWhisperModelConfig {
-        encoder: Some("models/tiny.en-encoder.int8.onnx".to_string()),
-        decoder: Some("models/tiny.en-decoder.int8.onnx".to_string()),
+        encoder: Some(crate::utils::model_path("tiny.en-encoder.int8.onnx")),
+        decoder: Some(crate::utils::model_path("tiny.en-decoder.int8.onnx")),
         language: Some("en".to_string()),
         task: Some("transcribe".to_string()),
         ..Default::default()
@@ -36,7 +47,7 @@ pub async fn agent() {
 
     let model_config = OfflineModelConfig {
         whisper: whisper_config,
-        tokens: Some("models/tiny.en-tokens.txt".to_string()),
+        tokens: Some(crate::utils::model_path("tiny.en-tokens.txt")),
         ..Default::default()
     };
 
@@ -54,7 +65,7 @@ pub async fn agent() {
     println!("[agent] Initializing VAD...");
 
     let silero_vad = SileroVadModelConfig {
-        model: Some("models/silero_vad.onnx".to_string()),
+        model: Some(crate::utils::model_path("silero_vad.onnx")),
 
         // More aggressive settings
         threshold: 0.7,
@@ -105,9 +116,14 @@ pub async fn agent() {
     println!("[agent] Initializing TTS...");
 
     let vits = OfflineTtsVitsModelConfig {
-        model: Some("models/en_US-lessac-medium.onnx".to_string()),
-        tokens: Some("models/tokens.txt".to_string()),
-        data_dir: Some("models/espeak-ng-data".to_string()),
+        model: Some(crate::utils::model_path("en_US-lessac-medium.onnx")),
+        tokens: Some(crate::utils::model_path("tokens.txt")),
+        data_dir: Some(
+            std::path::Path::new(&crate::utils::models_dir())
+                .join("espeak-ng-data")
+                .to_string_lossy()
+                .to_string(),
+        ),
         ..Default::default()
     };
 
