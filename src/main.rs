@@ -1,12 +1,9 @@
-mod commands;
 mod devices;
-mod download;
 mod error;
-mod file_ops;
-mod http;
 mod llm;
 mod registry;
 mod stt;
+mod tools;
 mod tts;
 mod utils;
 mod voice;

@@ -1,6 +1,6 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use crate::{commands, file_ops, http, llm, voice};
+use crate::{llm, tools, voice};
 
 pub type SyncHandler = fn(Vec<String>);
 
@@ -33,7 +33,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "create",
         Command {
             usage: "create <file>",
-            handler: CommandHandler::Sync(file_ops::create::create_file),
+            handler: CommandHandler::Sync(tools::file_ops::create::create_file),
         },
     );
 
@@ -41,7 +41,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "write",
         Command {
             usage: "write <file> <content>",
-            handler: CommandHandler::Sync(file_ops::write::write_file),
+            handler: CommandHandler::Sync(tools::file_ops::write::write_file),
         },
     );
 
@@ -49,7 +49,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "read",
         Command {
             usage: "read <file>",
-            handler: CommandHandler::Sync(file_ops::read::read_file),
+            handler: CommandHandler::Sync(tools::file_ops::read::read_file),
         },
     );
 
@@ -57,7 +57,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "delete",
         Command {
             usage: "delete <file>",
-            handler: CommandHandler::Sync(file_ops::delete::delete_file),
+            handler: CommandHandler::Sync(tools::file_ops::delete::delete_file),
         },
     );
 
@@ -65,7 +65,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "file_type",
         Command {
             usage: "file_type <file>",
-            handler: CommandHandler::Sync(file_ops::read::get_file_type),
+            handler: CommandHandler::Sync(tools::file_ops::read::get_file_type),
         },
     );
 
@@ -73,7 +73,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "create_directory",
         Command {
             usage: "create_directory <directory>",
-            handler: CommandHandler::Sync(file_ops::create::create_directory),
+            handler: CommandHandler::Sync(tools::file_ops::create::create_directory),
         },
     );
 
@@ -81,7 +81,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "read_entries",
         Command {
             usage: "read_entries <path>",
-            handler: CommandHandler::Sync(file_ops::read::read_entries),
+            handler: CommandHandler::Sync(tools::file_ops::read::read_entries),
         },
     );
 
@@ -89,7 +89,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "compress_file",
         Command {
             usage: "compress_file <source> <target>",
-            handler: CommandHandler::Sync(file_ops::compress::compress_file),
+            handler: CommandHandler::Sync(tools::file_ops::compress::compress_file),
         },
     );
 
@@ -97,7 +97,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "decompress_file",
         Command {
             usage: "decompress_file <source>",
-            handler: CommandHandler::Sync(file_ops::compress::decompress_file),
+            handler: CommandHandler::Sync(tools::file_ops::compress::decompress_file),
         },
     );
 
@@ -105,7 +105,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "full_path",
         Command {
             usage: "full_path <path>",
-            handler: CommandHandler::Sync(file_ops::read::full_path),
+            handler: CommandHandler::Sync(tools::file_ops::read::full_path),
         },
     );
 
@@ -113,7 +113,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "copy_file",
         Command {
             usage: "copy_file <source> <target>",
-            handler: CommandHandler::Sync(file_ops::create::copy_file),
+            handler: CommandHandler::Sync(tools::file_ops::create::copy_file),
         },
     );
 
@@ -121,7 +121,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "copy_and_replace_file",
         Command {
             usage: "copy_and_replace_file <source> <target>",
-            handler: CommandHandler::Sync(file_ops::create::copy_and_replace_file),
+            handler: CommandHandler::Sync(tools::file_ops::create::copy_and_replace_file),
         },
     );
 
@@ -129,7 +129,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "ip_address",
         Command {
             usage: "ip_address <version>",
-            handler: CommandHandler::Sync(commands::system::get_ip_address),
+            handler: CommandHandler::Sync(tools::system::system::get_ip_address),
         },
     );
 
@@ -145,7 +145,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "get",
         Command {
             usage: "get <url>",
-            handler: CommandHandler::Async(Box::new(async_handler(http::get::get))),
+            handler: CommandHandler::Async(Box::new(async_handler(tools::network::get::get))),
         },
     );
 
