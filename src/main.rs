@@ -1,10 +1,13 @@
-mod ai;
 mod commands;
+mod devices;
 mod download;
 mod error;
 mod file_ops;
 mod http;
+mod llm;
 mod registry;
+mod stt;
+mod tts;
 mod utils;
 mod voice;
 
@@ -33,14 +36,16 @@ async fn main() {
         }
 
         if input == "agent" {
-            voice::agent::agent().await;
+            voice::non_streaming_agent::agent().await;
         }
 
         if input == "voice" {
-            voice::local::record_and_play();
+            devices::mic_and_speaker::record_and_play();
         }
 
-        if input == "llm" {}
+        if input == "llm" {
+            llm::llama::run_local_agent();
+        }
 
         if input == "stream" {
             voice::streaming_agent::agent().await;
@@ -48,12 +53,12 @@ async fn main() {
 
         if input == "tts" {
             // voice::tts::generate_voice();
-            voice::tts::speak();
+            tts::sherpa::speak();
         }
 
         if input == "stt" {
             // voice::stt::listen_and_transcribe();
-            voice::stt::transcribe();
+            stt::sherpa::transcribe();
         }
 
         if input == "help" {

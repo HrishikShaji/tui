@@ -21,8 +21,8 @@ pub fn transcribe() {
     // =========================================
 
     let whisper_config = OfflineWhisperModelConfig {
-        encoder: Some("models/tiny.en-encoder.int8.onnx".to_string()),
-        decoder: Some("models/tiny.en-decoder.int8.onnx".to_string()),
+        encoder: Some("models/whisper/encoder.int8.onnx".to_string()),
+        decoder: Some("models/whisper/decoder.int8.onnx".to_string()),
         language: Some("en".to_string()),
         task: Some("transcribe".to_string()),
         ..Default::default()
@@ -30,7 +30,7 @@ pub fn transcribe() {
 
     let model_config = OfflineModelConfig {
         whisper: whisper_config,
-        tokens: Some("models/tiny.en-tokens.txt".to_string()),
+        tokens: Some("models/whisper/tokens.txt".to_string()),
         ..Default::default()
     };
 
@@ -47,7 +47,7 @@ pub fn transcribe() {
     // =========================================
 
     let silero_vad = SileroVadModelConfig {
-        model: Some("models/silero_vad.onnx".to_string()),
+        model: Some("models/vad/silero.onnx".to_string()),
         threshold: 0.5,
         min_silence_duration: 0.8,
         min_speech_duration: 0.25,

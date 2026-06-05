@@ -1,4 +1,4 @@
-use crate::voice::stt::to_mono;
+use crate::stt::sherpa::to_mono;
 
 use futures::StreamExt;
 use rig::agent::MultiTurnStreamItem;
@@ -27,19 +27,19 @@ pub async fn agent() {
     println!("[agent] Initializing speech recognizer...");
     println!(
         "tokens path: {}",
-        crate::utils::model_path("tiny.en-tokens.txt")
+        crate::utils::model_path("whisper/tokens.txt")
     );
 
     println!(
         "exists: {}",
-        std::path::Path::new(&crate::utils::model_path("tiny.en-tokens.txt")).exists()
+        std::path::Path::new(&crate::utils::model_path("whisper/tokens.txt")).exists()
     );
 
     println!("cwd: {:?}", std::env::current_dir().unwrap());
 
     let whisper_config = OfflineWhisperModelConfig {
-        encoder: Some(crate::utils::model_path("tiny.en-encoder.int8.onnx")),
-        decoder: Some(crate::utils::model_path("tiny.en-decoder.int8.onnx")),
+        encoder: Some(crate::utils::model_path("whisper/encoder.int8.onnx")),
+        decoder: Some(crate::utils::model_path("whisper/decoder.int8.onnx")),
         language: Some("en".to_string()),
         task: Some("transcribe".to_string()),
         ..Default::default()
@@ -47,7 +47,7 @@ pub async fn agent() {
 
     let model_config = OfflineModelConfig {
         whisper: whisper_config,
-        tokens: Some(crate::utils::model_path("tiny.en-tokens.txt")),
+        tokens: Some(crate::utils::model_path("whisper/tokens.txt")),
         ..Default::default()
     };
 
@@ -65,7 +65,7 @@ pub async fn agent() {
     println!("[agent] Initializing VAD...");
 
     let silero_vad = SileroVadModelConfig {
-        model: Some(crate::utils::model_path("silero_vad.onnx")),
+        model: Some(crate::utils::model_path("vad/silero.onnx")),
 
         // More aggressive settings
         threshold: 0.7,
@@ -116,14 +116,9 @@ pub async fn agent() {
     println!("[agent] Initializing TTS...");
 
     let vits = OfflineTtsVitsModelConfig {
-        model: Some(crate::utils::model_path("en_US-lessac-medium.onnx")),
-        tokens: Some(crate::utils::model_path("tokens.txt")),
-        data_dir: Some(
-            std::path::Path::new(&crate::utils::models_dir())
-                .join("espeak-ng-data")
-                .to_string_lossy()
-                .to_string(),
-        ),
+        model: Some(crate::utils::model_path("tts/en-lessac-medium.onnx")),
+        tokens: Some(crate::utils::model_path("tts/tokens.txt")),
+        data_dir: Some(crate::utils::model_path("tts/espeak-ng-data")),
         ..Default::default()
     };
 

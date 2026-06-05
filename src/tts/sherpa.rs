@@ -7,9 +7,9 @@ use sherpa_onnx::{
 pub fn speak() {
     // VITS config
     let vits = OfflineTtsVitsModelConfig {
-        model: Some("models/en_US-lessac-medium.onnx".to_string()),
-        tokens: Some("models/tokens.txt".to_string()),
-        data_dir: Some("models/espeak-ng-data".to_string()),
+        model: Some("models/tts/en-lessac-medium.onnx".to_string()),
+        tokens: Some("models/tts/tokens.txt".to_string()),
+        data_dir: Some("models/tts/espeak-ng-data".to_string()),
         ..Default::default()
     };
 

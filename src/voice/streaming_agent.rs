@@ -1,4 +1,4 @@
-use crate::voice::stt::to_mono;
+use crate::stt::sherpa::to_mono;
 
 use futures::StreamExt;
 
@@ -33,9 +33,9 @@ pub async fn agent() {
     println!("[agent] Initializing speech recognizer...");
 
     let whisper_config = OfflineWhisperModelConfig {
-        encoder: Some("models/tiny.en-encoder.int8.onnx".to_string()),
+        encoder: Some("models/whisper/encoder.int8.onnx".to_string()),
 
-        decoder: Some("models/tiny.en-decoder.int8.onnx".to_string()),
+        decoder: Some("models/whisper/decoder.int8.onnx".to_string()),
 
         language: Some("en".to_string()),
 
@@ -47,7 +47,7 @@ pub async fn agent() {
     let model_config = OfflineModelConfig {
         whisper: whisper_config,
 
-        tokens: Some("models/tiny.en-tokens.txt".to_string()),
+        tokens: Some("models/whisper/tokens.txt".to_string()),
 
         ..Default::default()
     };
@@ -67,7 +67,7 @@ pub async fn agent() {
     println!("[agent] Initializing VAD...");
 
     let silero_vad = SileroVadModelConfig {
-        model: Some("models/silero_vad.onnx".to_string()),
+        model: Some("models/vad/silero.onnx".to_string()),
 
         threshold: 0.7,
 
@@ -129,11 +129,11 @@ pub async fn agent() {
     println!("[agent] Initializing TTS...");
 
     let vits = OfflineTtsVitsModelConfig {
-        model: Some("models/en_US-lessac-medium.onnx".to_string()),
+        model: Some("models/tts/en-lessac-medium.onnx".to_string()),
 
-        tokens: Some("models/tokens.txt".to_string()),
+        tokens: Some("models/tts/tokens.txt".to_string()),
 
-        data_dir: Some("models/espeak-ng-data".to_string()),
+        data_dir: Some("models/tts/espeak-ng-data".to_string()),
 
         ..Default::default()
     };
