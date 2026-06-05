@@ -12,49 +12,90 @@ use crate::devices::mic::open_mic_stream;
 use crate::devices::resampler::create_resampler;
 use crate::devices::speaker::{open_output, play_samples};
 use crate::llm::rig::{create_ollama_client, create_voice_agent};
-use crate::stt::sherpa::{VadConfig, create_recognizer, create_vad, transcribe_audio};
+use crate::stt::sherpa::{SAMPLE_RATE, VadConfig, create_recognizer, create_vad, transcribe_audio};
 use crate::tts::sherpa::{create_tts, synthesize};
 
-const SAMPLE_RATE: i32 = 16000;
+use super::rig_generate::RigGenerateConfig;
+use super::sherpa_transcribe::TranscribeConfig;
+
 const MIC_SAMPLE_RATE: u32 = 48000;
 const MIC_CHUNK_SIZE: usize = 960;
+
+fn agent_vad() -> VadConfig {
+    VadConfig {
+        threshold: 0.7,
+        min_silence_duration: 1.2,
+        min_speech_duration: 0.4,
+        window_size: 512,
+        max_speech_duration: 20.0,
+    }
+}
+
+pub struct StreamingAgentConfig {
+    pub transcribe: TranscribeConfig,
+    pub rig: RigGenerateConfig,
+    pub tts_speed: f32,
+    pub sentence_buffer_flush: usize,
+}
+
+impl Default for StreamingAgentConfig {
+    fn default() -> Self {
+        Self {
+            transcribe: TranscribeConfig {
+                vad: agent_vad(),
+                mic_sample_rate: MIC_SAMPLE_RATE,
+                mic_chunk_size: MIC_CHUNK_SIZE,
+            },
+            rig: RigGenerateConfig {
+                preamble: "You are a helpful voice assistant. \
+                           Keep responses concise and conversational."
+                    .to_string(),
+                ..RigGenerateConfig::default()
+            },
+            tts_speed: 1.0,
+            sentence_buffer_flush: 120,
+        }
+    }
+}
 
 /// Speak a piece of text through the given output handle, if synthesis
 /// succeeds.
 fn speak_text(
     tts: &sherpa_onnx::OfflineTts,
     text: &str,
+    speed: f32,
     handle: &rodio::OutputStreamHandle,
 ) {
-    if let Some((samples, sample_rate)) = synthesize(tts, text, 1.0) {
+    if let Some((samples, sample_rate)) = synthesize(tts, text, speed) {
         play_samples(handle, &samples, sample_rate);
     } else {
         eprintln!("[tts] generation failed");
     }
 }
 
-pub async fn agent() {
+pub async fn agent_with_config(config: StreamingAgentConfig) {
+    let mic_sample_rate = config.transcribe.mic_sample_rate;
+    let mic_chunk_size = config.transcribe.mic_chunk_size;
+    let tts_speed = config.tts_speed;
+    let sentence_buffer_flush = config.sentence_buffer_flush;
+
     // ── Initialise components ────────────────────────────────────────
     println!("[agent] Initializing speech recognizer...");
     let recognizer = create_recognizer();
 
     println!("[agent] Initializing VAD...");
-    let mut vad = create_vad(VadConfig {
-        threshold: 0.7,
-        min_silence_duration: 1.2,
-        min_speech_duration: 0.4,
-        ..Default::default()
-    });
+    let mut vad = create_vad(config.transcribe.vad);
 
-    println!("[agent] Initializing resampler...");
-    let mut resampler = create_resampler(MIC_SAMPLE_RATE, SAMPLE_RATE as u32, MIC_CHUNK_SIZE);
+    println!("[agent] Initializing resampler ({}Hz -> {}Hz)...", mic_sample_rate, SAMPLE_RATE);
+    let mut resampler = create_resampler(mic_sample_rate, SAMPLE_RATE as u32, mic_chunk_size);
 
     println!("[agent] Initializing TTS...");
     let tts = create_tts();
 
     println!("[agent] Connecting to Ollama...");
-    let client = create_ollama_client().expect("failed to build Ollama client");
-    let llm_agent = create_voice_agent(&client);
+    let client =
+        create_ollama_client(&config.rig.base_url).expect("failed to build Ollama client");
+    let llm_agent = create_voice_agent(&client, &config.rig.model, &config.rig.preamble);
 
     println!("[agent] Opening microphone...");
     let (_stream, rx) = open_mic_stream().expect("failed to open microphone");
@@ -77,8 +118,8 @@ pub async fn agent() {
 
         mic_buffer.extend_from_slice(&chunk);
 
-        while mic_buffer.len() >= MIC_CHUNK_SIZE {
-            let input_chunk: Vec<f32> = mic_buffer.drain(..MIC_CHUNK_SIZE).collect();
+        while mic_buffer.len() >= mic_chunk_size {
+            let input_chunk: Vec<f32> = mic_buffer.drain(..mic_chunk_size).collect();
 
             // Resample 48kHz -> 16kHz
             let resampled = resampler
@@ -148,7 +189,7 @@ pub async fn agent() {
                                     let text = sentence.trim();
                                     if !text.is_empty() {
                                         println!("\n[tts] {}", text);
-                                        speak_text(&tts, text, &handle);
+                                        speak_text(&tts, text, tts_speed, &handle);
                                     }
                                 } else {
                                     break;
@@ -156,12 +197,12 @@ pub async fn agent() {
                             }
 
                             // Fallback flush for long runs without punctuation
-                            if sentence_buffer.len() > 120 {
+                            if sentence_buffer.len() > sentence_buffer_flush {
                                 let text = sentence_buffer.trim().to_string();
                                 sentence_buffer.clear();
 
                                 if !text.is_empty() {
-                                    speak_text(&tts, &text, &handle);
+                                    speak_text(&tts, &text, tts_speed, &handle);
                                 }
                             }
                         }
@@ -178,7 +219,7 @@ pub async fn agent() {
                 // Speak remaining buffered text
                 let remaining = sentence_buffer.trim();
                 if !remaining.is_empty() {
-                    speak_text(&tts, remaining, &handle);
+                    speak_text(&tts, remaining, tts_speed, &handle);
                 }
 
                 is_speaking.store(false, Ordering::Relaxed);
@@ -193,4 +234,9 @@ pub async fn agent() {
             }
         }
     }
+}
+
+/// Convenience wrapper using default configuration.
+pub async fn agent() {
+    agent_with_config(StreamingAgentConfig::default()).await;
 }

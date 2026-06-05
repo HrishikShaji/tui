@@ -47,21 +47,4 @@ pub fn synthesize(tts: &OfflineTts, text: &str, speed: f32) -> Option<(Vec<f32>,
         .map(|audio| (audio.samples().to_vec(), audio.sample_rate() as u32))
 }
 
-// ─── Standalone demo (called by the `tts` REPL command) ─────────────
 
-/// Generate and play a hardcoded sentence. This is the standalone `tts`
-/// command.
-pub fn speak() {
-    use crate::devices::speaker::{open_output, play_samples};
-
-    let tts = create_tts();
-
-    let text = "Hello from Sherpa ONNX text to speech in Rust.";
-
-    let (samples, sample_rate) = synthesize(&tts, text, 1.0).expect("failed to generate audio");
-
-    let (_stream, handle) = open_output();
-    play_samples(&handle, &samples, sample_rate);
-
-    println!("Done speaking!");
-}

@@ -1,3 +1,4 @@
+mod agents;
 mod devices;
 mod error;
 mod llm;
@@ -6,7 +7,6 @@ mod stt;
 mod tools;
 mod tts;
 mod utils;
-mod voice;
 
 use registry::CommandHandler;
 use std::io::{self, Write};
@@ -33,7 +33,7 @@ async fn main() {
         }
 
         if input == "agent" {
-            voice::non_streaming_agent::agent().await;
+            agents::non_streaming_agent::agent().await;
         }
 
         if input == "voice" {
@@ -41,21 +41,28 @@ async fn main() {
         }
 
         if input == "llm" {
-            llm::llama::run_local_agent();
+            agents::llama_generate::generate(agents::llama_generate::LlamaGenerateConfig::default());
         }
 
         if input == "stream" {
-            voice::streaming_agent::agent().await;
+            agents::streaming_agent::agent().await;
         }
 
         if input == "tts" {
-            // voice::tts::generate_voice();
-            tts::sherpa::speak();
+            agents::sherpa_speech_synthesis::speak(
+                agents::sherpa_speech_synthesis::SpeechSynthesisConfig::default(),
+            );
         }
 
         if input == "stt" {
-            // voice::stt::listen_and_transcribe();
-            stt::sherpa::transcribe();
+            agents::sherpa_transcribe::transcribe(
+                agents::sherpa_transcribe::TranscribeConfig::default(),
+            );
+        }
+
+        if input == "rig" {
+            agents::rig_generate::generate(agents::rig_generate::RigGenerateConfig::default())
+                .await;
         }
 
         if input == "help" {

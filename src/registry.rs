@@ -1,6 +1,6 @@
 use std::{collections::HashMap, future::Future, pin::Pin};
 
-use crate::{llm, tools, voice};
+use crate::{agents, tools};
 
 pub type SyncHandler = fn(Vec<String>);
 
@@ -137,7 +137,7 @@ pub fn build_registry() -> HashMap<&'static str, Command> {
         "ai",
         Command {
             usage: "ai <query>",
-            handler: CommandHandler::Async(Box::new(async_handler(llm::rig::call_agent))),
+            handler: CommandHandler::Async(Box::new(async_handler(agents::rig_generate::call_agent))),
         },
     );
 
