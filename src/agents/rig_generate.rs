@@ -69,6 +69,15 @@ impl Tool for Adder {
 
 /// Interactive async REPL loop using Ollama via rig.
 pub async fn generate(config: RigGenerateConfig) {
+    println!();
+    println!("=== Rig Agent (Ollama) ===");
+    println!("Endpoint : {}", config.base_url);
+    println!("Model    : {}", config.model);
+    println!("Preamble : {}", config.preamble);
+    println!();
+    println!("Type your message, or 'exit' to quit.");
+    println!();
+
     let client = match create_ollama_client(&config.base_url) {
         Ok(c) => c,
         Err(e) => {
@@ -79,15 +88,10 @@ pub async fn generate(config: RigGenerateConfig) {
 
     let agent = create_voice_agent(&client, &config.model, &config.preamble);
 
-    println!(
-        "Connected to Ollama ({}). Type your message (Ctrl+C or 'exit' to quit):\n",
-        config.base_url
-    );
-
     let stdin = io::stdin();
 
     loop {
-        print!("You: ");
+        print!("rig> ");
         io::stdout().flush().unwrap();
 
         let mut user_input = String::new();
@@ -105,7 +109,7 @@ pub async fn generate(config: RigGenerateConfig) {
             continue;
         }
         if user_input.eq_ignore_ascii_case("exit") || user_input.eq_ignore_ascii_case("quit") {
-            println!("Goodbye!");
+            println!("Leaving Rig agent.");
             break;
         }
 

@@ -24,15 +24,21 @@ impl Default for LlamaGenerateConfig {
 
 /// Interactive local LLM chat loop using llama.cpp.
 pub fn generate(config: LlamaGenerateConfig) {
-    let (backend, model) = load_model(&config.model_file);
+    println!();
+    println!("=== LLM Agent (llama.cpp) ===");
+    println!("Model      : {}", config.model_file);
+    println!("Max tokens : {}", config.max_tokens);
+    println!();
+    println!("Type your message, or 'exit' to quit.");
+    println!();
 
-    println!("Model loaded. Type your message and press Enter (Ctrl+C or 'exit' to quit):\n");
+    let (backend, model) = load_model(&config.model_file);
 
     let stdin = io::stdin();
     let mut history: Vec<(String, String)> = Vec::new();
 
     loop {
-        print!("You: ");
+        print!("llm> ");
         io::stdout().flush().unwrap();
 
         let mut user_input = String::new();
@@ -50,7 +56,7 @@ pub fn generate(config: LlamaGenerateConfig) {
             continue;
         }
         if user_input.eq_ignore_ascii_case("exit") || user_input.eq_ignore_ascii_case("quit") {
-            println!("Goodbye!");
+            println!("Leaving LLM agent.");
             break;
         }
 

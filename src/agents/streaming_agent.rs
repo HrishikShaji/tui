@@ -2,11 +2,7 @@ use futures::StreamExt;
 use rubato::Resampler;
 use rig::agent::MultiTurnStreamItem;
 use rig::streaming::{StreamedAssistantContent, StreamingPrompt};
-use std::io::{self, Write};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+use std::io::{self, BufRead, Write};
 
 use crate::devices::mic::open_mic_stream;
 use crate::devices::resampler::create_resampler;
@@ -79,6 +75,19 @@ pub async fn agent_with_config(config: StreamingAgentConfig) {
     let tts_speed = config.tts_speed;
     let sentence_buffer_flush = config.sentence_buffer_flush;
 
+    // ── Welcome banner ───────────────────────────────────────────────
+    println!();
+    println!("=== Voice Agent (Streaming TTS) ===");
+    println!("LLM      : Ollama {} @ {}", config.rig.model, config.rig.base_url);
+    println!("Preamble : {}", config.rig.preamble);
+    println!("STT      : Whisper (sherpa-onnx)");
+    println!("TTS      : VITS en-lessac-medium, speed={}, sentence flush={}",
+        config.tts_speed, config.sentence_buffer_flush);
+    println!("VAD      : Silero (threshold=0.7, silence=1.2s)");
+    println!();
+    println!("Press Enter to start a voice turn, or type 'exit' to quit.");
+    println!();
+
     // ── Initialise components ────────────────────────────────────────
     println!("[agent] Initializing speech recognizer...");
     let recognizer = create_recognizer();
@@ -97,142 +106,162 @@ pub async fn agent_with_config(config: StreamingAgentConfig) {
         create_ollama_client(&config.rig.base_url).expect("failed to build Ollama client");
     let llm_agent = create_voice_agent(&client, &config.rig.model, &config.rig.preamble);
 
-    println!("[agent] Opening microphone...");
-    let (_stream, rx) = open_mic_stream().expect("failed to open microphone");
+    let stdin = io::stdin();
 
     // ── Main loop ────────────────────────────────────────────────────
-    let is_speaking = Arc::new(AtomicBool::new(false));
-
-    println!("\n[agent] Ready. Listening...\n");
-
-    let mut mic_buffer: Vec<f32> = Vec::new();
-    let mut current_speech: Vec<f32> = Vec::new();
-    let mut was_speaking = false;
-
     loop {
-        let chunk = rx.recv().expect("failed to receive audio");
+        print!("stream> Press Enter to speak, or type 'exit': ");
+        io::stdout().flush().unwrap();
 
-        if is_speaking.load(Ordering::Relaxed) {
-            continue;
+        let mut cmd = String::new();
+        match stdin.lock().read_line(&mut cmd) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Error reading input: {e}");
+                break;
+            }
         }
 
-        mic_buffer.extend_from_slice(&chunk);
+        let cmd = cmd.trim();
+        if cmd.eq_ignore_ascii_case("exit") || cmd.eq_ignore_ascii_case("quit") {
+            println!("Leaving streaming agent.");
+            break;
+        }
 
-        while mic_buffer.len() >= mic_chunk_size {
-            let input_chunk: Vec<f32> = mic_buffer.drain(..mic_chunk_size).collect();
+        // ── Listen for one utterance ─────────────────────────────────
+        println!("[agent] Opening microphone...");
+        let (_mic_stream, rx) = open_mic_stream().expect("failed to open microphone");
+        println!("[agent] Listening...");
 
-            // Resample 48kHz -> 16kHz
-            let resampled = resampler
-                .process(&vec![input_chunk], None)
-                .expect("resampling failed");
-            let chunk_16k = &resampled[0];
+        let mut mic_buffer: Vec<f32> = Vec::new();
+        let mut current_speech: Vec<f32> = Vec::new();
+        let mut was_speaking = false;
+        let mut transcript_result: Option<String> = None;
 
-            // Feed into VAD
-            vad.accept_waveform(chunk_16k);
+        loop {
+            let chunk = rx.recv().expect("failed to receive audio");
+            mic_buffer.extend_from_slice(&chunk);
 
-            while !vad.is_empty() {
-                let segment = vad.front().unwrap();
-                current_speech.extend_from_slice(segment.samples());
-                was_speaking = true;
-                vad.pop();
+            while mic_buffer.len() >= mic_chunk_size {
+                let input_chunk: Vec<f32> = mic_buffer.drain(..mic_chunk_size).collect();
+
+                let resampled = resampler
+                    .process(&vec![input_chunk], None)
+                    .expect("resampling failed");
+                let chunk_16k = &resampled[0];
+
+                vad.accept_waveform(chunk_16k);
+
+                while !vad.is_empty() {
+                    let segment = vad.front().unwrap();
+                    current_speech.extend_from_slice(segment.samples());
+                    was_speaking = true;
+                    vad.pop();
+                }
+
+                if was_speaking && vad.is_empty() && current_speech.len() > SAMPLE_RATE as usize {
+                    println!("\n[agent] Speech detected, transcribing...");
+
+                    let text = transcribe_audio(&recognizer, &current_speech, SAMPLE_RATE);
+                    current_speech.clear();
+                    vad.clear();
+
+                    if let Some(t) = text {
+                        transcript_result = Some(t);
+                        break;
+                    } else {
+                        println!("[agent] (empty transcript, try again)");
+                        was_speaking = false;
+                    }
+                }
             }
 
-            // Process after silence
-            if was_speaking && vad.is_empty() && current_speech.len() > SAMPLE_RATE as usize {
-                println!("\n[agent] Speech detected...");
+            if transcript_result.is_some() {
+                break;
+            }
+        }
 
-                // ── Transcribe ───────────────────────────────────────
-                let transcript = match transcribe_audio(&recognizer, &current_speech, SAMPLE_RATE) {
-                    Some(t) => t,
-                    None => {
-                        println!("[agent] empty transcript");
-                        current_speech.clear();
-                        was_speaking = false;
-                        continue;
-                    }
-                };
+        // Drop mic stream so it doesn't interfere with TTS playback
+        drop(_mic_stream);
 
-                current_speech.clear();
-                was_speaking = false;
+        let transcript = match transcript_result {
+            Some(t) => t,
+            None => continue,
+        };
 
-                println!("\n[agent] {}", transcript);
+        println!("[agent] Transcript: \"{}\"", transcript);
 
-                // ── Streaming LLM + sentence-by-sentence TTS ─────────
-                println!("\n[agent] Generating response...\n");
-                is_speaking.store(true, Ordering::Relaxed);
+        // ── Streaming LLM + sentence-by-sentence TTS ─────────────────
+        println!("[agent] Generating response...\n");
 
-                let (_out_stream, handle) = open_output();
-                let mut llm_stream = llm_agent.stream_prompt(&transcript).await;
-                let mut sentence_buffer = String::new();
+        let (_out_stream, handle) = open_output();
+        let mut llm_stream = llm_agent.stream_prompt(&transcript).await;
+        let mut sentence_buffer = String::new();
 
-                print!("[assistant] ");
-                io::stdout().flush().unwrap();
+        print!("[assistant] ");
+        io::stdout().flush().unwrap();
 
-                while let Some(item) = llm_stream.next().await {
-                    match item {
-                        Ok(MultiTurnStreamItem::StreamAssistantItem(
-                            StreamedAssistantContent::Text(t),
-                        )) => {
-                            print!("{}", t.text);
-                            io::stdout().flush().unwrap();
-                            sentence_buffer.push_str(&t.text);
+        while let Some(item) = llm_stream.next().await {
+            match item {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(
+                    StreamedAssistantContent::Text(t),
+                )) => {
+                    print!("{}", t.text);
+                    io::stdout().flush().unwrap();
+                    sentence_buffer.push_str(&t.text);
 
-                            // Extract and speak complete sentences
-                            loop {
-                                let pos = sentence_buffer
-                                    .find(|c| c == '.' || c == '?' || c == '!' || c == '\n');
+                    // Extract and speak complete sentences
+                    loop {
+                        let pos = sentence_buffer
+                            .find(|c| c == '.' || c == '?' || c == '!' || c == '\n');
 
-                                if let Some(idx) = pos {
-                                    let sentence = sentence_buffer[..=idx].to_string();
-                                    sentence_buffer = sentence_buffer[idx + 1..].to_string();
+                        if let Some(idx) = pos {
+                            let sentence = sentence_buffer[..=idx].to_string();
+                            sentence_buffer = sentence_buffer[idx + 1..].to_string();
 
-                                    let text = sentence.trim();
-                                    if !text.is_empty() {
-                                        println!("\n[tts] {}", text);
-                                        speak_text(&tts, text, tts_speed, &handle);
-                                    }
-                                } else {
-                                    break;
-                                }
+                            let text = sentence.trim();
+                            if !text.is_empty() {
+                                println!("\n[tts] {}", text);
+                                speak_text(&tts, text, tts_speed, &handle);
                             }
-
-                            // Fallback flush for long runs without punctuation
-                            if sentence_buffer.len() > sentence_buffer_flush {
-                                let text = sentence_buffer.trim().to_string();
-                                sentence_buffer.clear();
-
-                                if !text.is_empty() {
-                                    speak_text(&tts, &text, tts_speed, &handle);
-                                }
-                            }
-                        }
-
-                        Ok(_) => {}
-
-                        Err(e) => {
-                            eprintln!("\n[agent] LLM error: {}", e);
+                        } else {
                             break;
                         }
                     }
+
+                    // Fallback flush for long runs without punctuation
+                    if sentence_buffer.len() > sentence_buffer_flush {
+                        let text = sentence_buffer.trim().to_string();
+                        sentence_buffer.clear();
+
+                        if !text.is_empty() {
+                            speak_text(&tts, &text, tts_speed, &handle);
+                        }
+                    }
                 }
 
-                // Speak remaining buffered text
-                let remaining = sentence_buffer.trim();
-                if !remaining.is_empty() {
-                    speak_text(&tts, remaining, tts_speed, &handle);
+                Ok(_) => {}
+
+                Err(e) => {
+                    eprintln!("\n[agent] LLM error: {}", e);
+                    break;
                 }
-
-                is_speaking.store(false, Ordering::Relaxed);
-
-                // ── Cleanup ──────────────────────────────────────────
-                mic_buffer.clear();
-                current_speech.clear();
-                vad.clear();
-
-                println!("\n\n[agent] Done speaking.");
-                println!("\n[agent] Listening...\n");
             }
         }
+
+        // Speak remaining buffered text
+        let remaining = sentence_buffer.trim();
+        if !remaining.is_empty() {
+            speak_text(&tts, remaining, tts_speed, &handle);
+        }
+
+        // ── Cleanup ──────────────────────────────────────────────────
+        mic_buffer.clear();
+        current_speech.clear();
+        vad.clear();
+
+        println!("\n\n[agent] Done speaking.\n");
     }
 }
 

@@ -67,9 +67,16 @@ async fn main() {
 
         if input == "help" {
             println!("Commands:");
+            println!("  agent   -> Voice agent (non-streaming TTS)");
+            println!("  stream  -> Voice agent (streaming TTS)");
+            println!("  llm     -> Local LLM chat (llama.cpp)");
+            println!("  rig     -> Ollama LLM chat (rig)");
+            println!("  tts     -> Text-to-speech (type text to speak)");
+            println!("  stt     -> Speech-to-text (microphone)");
+            println!("  voice   -> Record and playback");
 
             for (name, command) in &registry {
-                println!("{name} -> {}", command.usage);
+                println!("  {name} -> {}", command.usage);
             }
 
             continue;

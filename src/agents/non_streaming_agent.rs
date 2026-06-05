@@ -2,7 +2,7 @@ use futures::StreamExt;
 use rubato::Resampler;
 use rig::agent::MultiTurnStreamItem;
 use rig::streaming::{StreamedAssistantContent, StreamingPrompt};
-use std::io::{self, Write};
+use std::io::{self, BufRead, Write};
 
 use crate::devices::mic::open_mic_stream;
 use crate::devices::resampler::create_resampler;
@@ -56,6 +56,18 @@ pub async fn agent_with_config(config: NonStreamingAgentConfig) {
     let mic_sample_rate = config.transcribe.mic_sample_rate;
     let mic_chunk_size = config.transcribe.mic_chunk_size;
 
+    // ── Welcome banner ───────────────────────────────────────────────
+    println!();
+    println!("=== Voice Agent (Non-Streaming TTS) ===");
+    println!("LLM      : Ollama {} @ {}", config.rig.model, config.rig.base_url);
+    println!("Preamble : {}", config.rig.preamble);
+    println!("STT      : Whisper (sherpa-onnx)");
+    println!("TTS      : VITS en-lessac-medium, speed={}", config.tts_speed);
+    println!("VAD      : Silero (threshold=0.7, silence=1.2s)");
+    println!();
+    println!("Press Enter to start a voice turn, or type 'exit' to quit.");
+    println!();
+
     // ── Initialise components ────────────────────────────────────────
     println!("[agent] Initializing speech recognizer...");
     let recognizer = create_recognizer();
@@ -75,122 +87,132 @@ pub async fn agent_with_config(config: NonStreamingAgentConfig) {
     let llm_agent = create_voice_agent(&client, &config.rig.model, &config.rig.preamble);
 
     let tts_speed = config.tts_speed;
-
-    println!("[agent] Opening microphone...");
-    let (_stream, rx) = open_mic_stream().expect("failed to open microphone");
+    let stdin = io::stdin();
 
     // ── Main loop ────────────────────────────────────────────────────
-    println!("[agent] Ready. Listening for speech...\n");
-
-    let mut mic_buffer: Vec<f32> = Vec::new();
-    let mut current_speech: Vec<f32> = Vec::new();
-    let mut was_speaking = false;
-    let mut is_speaking = false;
-
     loop {
-        let chunk = rx.recv().expect("failed to receive audio");
+        print!("agent> Press Enter to speak, or type 'exit': ");
+        io::stdout().flush().unwrap();
 
-        if is_speaking {
+        let mut cmd = String::new();
+        match stdin.lock().read_line(&mut cmd) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) => {
+                eprintln!("Error reading input: {e}");
+                break;
+            }
+        }
+
+        let cmd = cmd.trim();
+        if cmd.eq_ignore_ascii_case("exit") || cmd.eq_ignore_ascii_case("quit") {
+            println!("Leaving voice agent.");
+            break;
+        }
+
+        // ── Listen for one utterance ─────────────────────────────────
+        println!("[agent] Opening microphone...");
+        let (_stream, rx) = open_mic_stream().expect("failed to open microphone");
+        println!("[agent] Listening...");
+
+        let mut mic_buffer: Vec<f32> = Vec::new();
+        let mut current_speech: Vec<f32> = Vec::new();
+        let mut was_speaking = false;
+        let mut transcript_result: Option<String> = None;
+
+        loop {
+            let chunk = rx.recv().expect("failed to receive audio");
+            mic_buffer.extend_from_slice(&chunk);
+
+            while mic_buffer.len() >= mic_chunk_size {
+                let input_chunk: Vec<f32> = mic_buffer.drain(..mic_chunk_size).collect();
+
+                let resampled = resampler
+                    .process(&vec![input_chunk], None)
+                    .expect("resampling failed");
+                let chunk_16k = &resampled[0];
+
+                vad.accept_waveform(chunk_16k);
+
+                while !vad.is_empty() {
+                    let segment = vad.front().unwrap();
+                    current_speech.extend_from_slice(segment.samples());
+                    was_speaking = true;
+                    vad.pop();
+                }
+
+                if was_speaking && vad.is_empty() && current_speech.len() > SAMPLE_RATE as usize {
+                    println!("\n[agent] Speech detected, transcribing...");
+
+                    let text = transcribe_audio(&recognizer, &current_speech, SAMPLE_RATE);
+                    current_speech.clear();
+                    vad.clear();
+
+                    if let Some(t) = text {
+                        transcript_result = Some(t);
+                        break;
+                    } else {
+                        println!("[agent] (empty transcript, try again)");
+                        was_speaking = false;
+                    }
+                }
+            }
+
+            if transcript_result.is_some() {
+                break;
+            }
+        }
+
+        let transcript = match transcript_result {
+            Some(t) => t,
+            None => continue,
+        };
+
+        println!("[agent] Transcript: \"{}\"", transcript);
+
+        // ── LLM ──────────────────────────────────────────────────────
+        println!("[agent] Sending to LLM...");
+        print!("[agent] Response: ");
+        io::stdout().flush().unwrap();
+
+        let mut response_text = String::new();
+        let mut llm_stream = llm_agent.stream_prompt(&transcript).await;
+
+        while let Some(item) = llm_stream.next().await {
+            match item {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(
+                    StreamedAssistantContent::Text(t),
+                )) => {
+                    print!("{}", t.text);
+                    io::stdout().flush().unwrap();
+                    response_text.push_str(&t.text);
+                }
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!("\n[agent] LLM error: {}", e);
+                    break;
+                }
+            }
+        }
+
+        println!();
+
+        if response_text.trim().is_empty() {
+            println!("[agent] (empty LLM response)");
             continue;
         }
 
-        mic_buffer.extend_from_slice(&chunk);
+        // ── TTS ──────────────────────────────────────────────────────
+        println!("[agent] Speaking response...");
 
-        while mic_buffer.len() >= mic_chunk_size {
-            let input_chunk: Vec<f32> = mic_buffer.drain(..mic_chunk_size).collect();
-
-            // Resample 48kHz -> 16kHz
-            let resampled = resampler
-                .process(&vec![input_chunk], None)
-                .expect("resampling failed");
-            let chunk_16k = &resampled[0];
-
-            // Feed into VAD
-            vad.accept_waveform(chunk_16k);
-
-            while !vad.is_empty() {
-                let segment = vad.front().unwrap();
-                current_speech.extend_from_slice(segment.samples());
-                was_speaking = true;
-                vad.pop();
-            }
-
-            // Process after silence
-            if was_speaking && vad.is_empty() && current_speech.len() > SAMPLE_RATE as usize {
-                println!("\n[agent] Speech detected, transcribing...");
-
-                // ── Transcribe ───────────────────────────────────────
-                let transcript = match transcribe_audio(&recognizer, &current_speech, SAMPLE_RATE) {
-                    Some(t) => t,
-                    None => {
-                        println!("[agent] (empty transcript, skipping)");
-                        println!("\n[agent] Listening...");
-                        current_speech.clear();
-                        was_speaking = false;
-                        continue;
-                    }
-                };
-
-                current_speech.clear();
-                was_speaking = false;
-
-                println!("[agent] Transcript: \"{}\"", transcript);
-
-                // ── LLM ──────────────────────────────────────────────
-                println!("[agent] Sending to LLM...");
-                print!("[agent] Response: ");
-                io::stdout().flush().unwrap();
-
-                let mut response_text = String::new();
-                let mut llm_stream = llm_agent.stream_prompt(&transcript).await;
-
-                while let Some(item) = llm_stream.next().await {
-                    match item {
-                        Ok(MultiTurnStreamItem::StreamAssistantItem(
-                            StreamedAssistantContent::Text(t),
-                        )) => {
-                            print!("{}", t.text);
-                            io::stdout().flush().unwrap();
-                            response_text.push_str(&t.text);
-                        }
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("\n[agent] LLM error: {}", e);
-                            break;
-                        }
-                    }
-                }
-
-                println!();
-
-                if response_text.trim().is_empty() {
-                    println!("[agent] (empty LLM response)");
-                    println!("\n[agent] Listening...");
-                    continue;
-                }
-
-                // ── TTS ──────────────────────────────────────────────
-                println!("[agent] Speaking response...");
-                is_speaking = true;
-
-                if let Some((samples, sample_rate)) = synthesize(&tts, &response_text, tts_speed) {
-                    let (_out_stream, handle) = open_output();
-                    play_samples(&handle, &samples, sample_rate);
-                } else {
-                    eprintln!("[agent] TTS generation failed");
-                }
-
-                is_speaking = false;
-
-                // ── Cleanup ──────────────────────────────────────────
-                mic_buffer.clear();
-                current_speech.clear();
-                vad.clear();
-
-                println!("[agent] Done speaking.");
-                println!("\n[agent] Listening...");
-            }
+        if let Some((samples, sample_rate)) = synthesize(&tts, &response_text, tts_speed) {
+            let (_out_stream, handle) = open_output();
+            play_samples(&handle, &samples, sample_rate);
+        } else {
+            eprintln!("[agent] TTS generation failed");
         }
+
+        println!("[agent] Done speaking.\n");
     }
 }
 
