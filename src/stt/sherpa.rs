@@ -1,28 +1,45 @@
-use anyhow::Result;
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use crossbeam_channel::{Receiver, unbounded};
-use rubato::{
-    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
-};
-
+use rubato::Resampler;
 use sherpa_onnx::{
     OfflineModelConfig, OfflineRecognizer, OfflineRecognizerConfig, OfflineWhisperModelConfig,
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
+use crate::utils::model_path;
+
 const SAMPLE_RATE: i32 = 16000;
 const MIC_SAMPLE_RATE: u32 = 48000;
-// 20ms chunks at 48kHz
 const MIC_CHUNK_SIZE: usize = 960;
 
-pub fn transcribe() {
-    // =========================================
-    // WHISPER CONFIG
-    // =========================================
+// ─── VAD configuration ───────────────────────────────────────────────
 
+/// Configurable parameters for the Silero VAD.
+pub struct VadConfig {
+    pub threshold: f32,
+    pub min_silence_duration: f32,
+    pub min_speech_duration: f32,
+    pub window_size: i32,
+    pub max_speech_duration: f32,
+}
+
+impl Default for VadConfig {
+    fn default() -> Self {
+        Self {
+            threshold: 0.5,
+            min_silence_duration: 0.8,
+            min_speech_duration: 0.25,
+            window_size: 512,
+            max_speech_duration: 20.0,
+        }
+    }
+}
+
+// ─── Builder functions ───────────────────────────────────────────────
+
+/// Create an offline Whisper recognizer for English transcription.
+pub fn create_recognizer() -> OfflineRecognizer {
     let whisper_config = OfflineWhisperModelConfig {
-        encoder: Some("models/whisper/encoder.int8.onnx".to_string()),
-        decoder: Some("models/whisper/decoder.int8.onnx".to_string()),
+        encoder: Some(model_path("whisper/encoder.int8.onnx")),
+        decoder: Some(model_path("whisper/decoder.int8.onnx")),
         language: Some("en".to_string()),
         task: Some("transcribe".to_string()),
         ..Default::default()
@@ -30,7 +47,7 @@ pub fn transcribe() {
 
     let model_config = OfflineModelConfig {
         whisper: whisper_config,
-        tokens: Some("models/whisper/tokens.txt".to_string()),
+        tokens: Some(model_path("whisper/tokens.txt")),
         ..Default::default()
     };
 
@@ -39,20 +56,18 @@ pub fn transcribe() {
         ..Default::default()
     };
 
-    let recognizer =
-        OfflineRecognizer::create(&recognizer_config).expect("failed to create recognizer");
+    OfflineRecognizer::create(&recognizer_config).expect("failed to create recognizer")
+}
 
-    // =========================================
-    // VAD CONFIG
-    // =========================================
-
+/// Create a Silero voice-activity detector with the given configuration.
+pub fn create_vad(config: VadConfig) -> VoiceActivityDetector {
     let silero_vad = SileroVadModelConfig {
-        model: Some("models/vad/silero.onnx".to_string()),
-        threshold: 0.5,
-        min_silence_duration: 0.8,
-        min_speech_duration: 0.25,
-        window_size: 512,
-        max_speech_duration: 20.0,
+        model: Some(model_path("vad/silero.onnx")),
+        threshold: config.threshold,
+        min_silence_duration: config.min_silence_duration,
+        min_speech_duration: config.min_speech_duration,
+        window_size: config.window_size,
+        max_speech_duration: config.max_speech_duration,
     };
 
     let vad_model = VadModelConfig {
@@ -64,65 +79,72 @@ pub fn transcribe() {
         ..Default::default()
     };
 
-    let mut vad = VoiceActivityDetector::create(&vad_model, 30.0).expect("failed to create VAD");
+    VoiceActivityDetector::create(&vad_model, 30.0).expect("failed to create VAD")
+}
 
-    // =========================================
-    // RESAMPLER: 48000 Hz -> 16000 Hz
-    // =========================================
+/// Run the recognizer on a buffer of 16 kHz mono samples and return the
+/// trimmed transcript, or `None` if empty / inaudible.
+pub fn transcribe_audio(
+    recognizer: &OfflineRecognizer,
+    samples: &[f32],
+    sample_rate: i32,
+) -> Option<String> {
+    let mut stream = recognizer.create_stream();
+    stream.accept_waveform(sample_rate, samples);
+    recognizer.decode(&mut stream);
 
-    let resample_ratio = SAMPLE_RATE as f64 / MIC_SAMPLE_RATE as f64; // 1/3
+    match stream.get_result() {
+        Some(r) => {
+            let text = r.text.trim().to_string();
+            if text.is_empty() || text == "[inaudible]" {
+                None
+            } else {
+                Some(text)
+            }
+        }
+        None => None,
+    }
+}
 
-    let sinc_params = SincInterpolationParameters {
-        sinc_len: 256,
-        f_cutoff: 0.95,
-        interpolation: SincInterpolationType::Linear,
-        oversampling_factor: 256,
-        window: WindowFunction::BlackmanHarris2,
-    };
+// ─── Standalone demo (called by the `stt` REPL command) ─────────────
 
-    let mut resampler = SincFixedIn::<f32>::new(
-        resample_ratio,
-        2.0,
-        sinc_params,
-        MIC_CHUNK_SIZE,
-        1, // mono
-    )
-    .expect("failed to create resampler");
+/// Continuously listen on the default microphone, detect speech via VAD,
+/// and print transcriptions. This is the standalone `stt` command.
+pub fn transcribe() {
+    use crate::devices::mic::open_mic_stream;
+    use crate::devices::resampler::create_resampler;
 
-    // =========================================
-    // MICROPHONE
-    // =========================================
+    println!("[stt] Initializing recognizer...");
+    let recognizer = create_recognizer();
 
-    let (_stream, rx) = microphone_stream().expect("failed to create microphone stream");
+    println!("[stt] Initializing VAD...");
+    let mut vad = create_vad(VadConfig::default());
+
+    println!("[stt] Initializing resampler (48kHz -> 16kHz)...");
+    let mut resampler = create_resampler(MIC_SAMPLE_RATE, SAMPLE_RATE as u32, MIC_CHUNK_SIZE);
+
+    let (_stream, rx) = open_mic_stream().expect("failed to open microphone");
 
     println!("Listening...");
 
+    let mut mic_buffer: Vec<f32> = Vec::new();
     let mut current_speech: Vec<f32> = Vec::new();
     let mut was_speaking = false;
-    // Buffer for accumulating mic samples into exact MIC_CHUNK_SIZE chunks
-    let mut mic_buffer: Vec<f32> = Vec::new();
 
     loop {
         let chunk = rx.recv().expect("failed to receive audio");
-
         mic_buffer.extend_from_slice(&chunk);
 
-        // Process in fixed-size chunks so the resampler always gets exactly
-        // MIC_CHUNK_SIZE samples
         while mic_buffer.len() >= MIC_CHUNK_SIZE {
             let input_chunk: Vec<f32> = mic_buffer.drain(..MIC_CHUNK_SIZE).collect();
 
-            // Resample 48kHz -> 16kHz
-            let waves_in = vec![input_chunk];
             let resampled = resampler
-                .process(&waves_in, None)
+                .process(&vec![input_chunk], None)
                 .expect("resampling failed");
             let chunk_16k = &resampled[0];
 
-            // Feed resampled audio into VAD
             vad.accept_waveform(chunk_16k);
 
-            // Collect detected speech segments
             while !vad.is_empty() {
                 let segment = vad.front().unwrap();
                 current_speech.extend_from_slice(segment.samples());
@@ -130,19 +152,11 @@ pub fn transcribe() {
                 vad.pop();
             }
 
-            // Speech ended -> transcribe once we have at least 1 second of audio
             if was_speaking && current_speech.len() > SAMPLE_RATE as usize {
                 println!("Processing speech...");
 
-                let mut stream = recognizer.create_stream();
-                stream.accept_waveform(SAMPLE_RATE, &current_speech);
-                recognizer.decode(&mut stream);
-
-                if let Some(result) = stream.get_result() {
-                    let text = result.text.trim();
-                    if !text.is_empty() {
-                        println!("Transcript: {}", text);
-                    }
+                if let Some(text) = transcribe_audio(&recognizer, &current_speech, SAMPLE_RATE) {
+                    println!("Transcript: {}", text);
                 }
 
                 current_speech.clear();
@@ -151,75 +165,4 @@ pub fn transcribe() {
             }
         }
     }
-}
-
-fn microphone_stream() -> Result<(cpal::Stream, Receiver<Vec<f32>>)> {
-    let host = cpal::default_host();
-    let device = host.default_input_device().expect("no microphone found");
-
-    println!("Using microphone: {}", device.name().unwrap());
-
-    let supported_config = device.default_input_config()?;
-    let sample_format = supported_config.sample_format();
-    let config: cpal::StreamConfig = supported_config.into();
-
-    println!("Input Sample Rate: {}", config.sample_rate.0);
-    println!("Input Channels: {}", config.channels);
-
-    let channels = config.channels as usize;
-    let (tx, rx) = unbounded::<Vec<f32>>();
-
-    let err_fn = |err| {
-        eprintln!("stream error: {}", err);
-    };
-
-    let stream = match sample_format {
-        cpal::SampleFormat::F32 => device.build_input_stream(
-            &config,
-            move |data: &[f32], _| {
-                let mono = to_mono(data, channels);
-                tx.send(mono).ok();
-            },
-            err_fn,
-            None,
-        )?,
-
-        cpal::SampleFormat::I16 => device.build_input_stream(
-            &config,
-            move |data: &[i16], _| {
-                let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 32768.0).collect();
-                let mono = to_mono(&samples, channels);
-                tx.send(mono).ok();
-            },
-            err_fn,
-            None,
-        )?,
-
-        cpal::SampleFormat::U16 => device.build_input_stream(
-            &config,
-            move |data: &[u16], _| {
-                let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 65535.0 - 0.5).collect();
-                let mono = to_mono(&samples, channels);
-                tx.send(mono).ok();
-            },
-            err_fn,
-            None,
-        )?,
-
-        _ => panic!("unsupported sample format"),
-    };
-
-    stream.play()?;
-    Ok((stream, rx))
-}
-
-pub fn to_mono(input: &[f32], channels: usize) -> Vec<f32> {
-    if channels == 1 {
-        return input.to_vec();
-    }
-
-    input
-        .chunks_exact(channels)
-        .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-        .collect()
 }

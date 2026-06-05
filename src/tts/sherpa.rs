@@ -1,19 +1,21 @@
-use rodio::{OutputStream, Sink, buffer::SamplesBuffer};
 use sherpa_onnx::{
     GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsModelConfig,
     OfflineTtsVitsModelConfig,
 };
 
-pub fn speak() {
-    // VITS config
+use crate::utils::model_path;
+
+// ─── Builder functions ───────────────────────────────────────────────
+
+/// Create an offline VITS text-to-speech engine.
+pub fn create_tts() -> OfflineTts {
     let vits = OfflineTtsVitsModelConfig {
-        model: Some("models/tts/en-lessac-medium.onnx".to_string()),
-        tokens: Some("models/tts/tokens.txt".to_string()),
-        data_dir: Some("models/tts/espeak-ng-data".to_string()),
+        model: Some(model_path("tts/en-lessac-medium.onnx")),
+        tokens: Some(model_path("tts/tokens.txt")),
+        data_dir: Some(model_path("tts/espeak-ng-data")),
         ..Default::default()
     };
 
-    // Model config
     let model = OfflineTtsModelConfig {
         vits,
         provider: Some("cpu".to_string()),
@@ -22,7 +24,6 @@ pub fn speak() {
         ..Default::default()
     };
 
-    // Full config
     let config = OfflineTtsConfig {
         model,
         max_num_sentences: 1,
@@ -31,44 +32,36 @@ pub fn speak() {
         silence_scale: 0.2,
     };
 
-    // Create TTS
-    let tts = OfflineTts::create(&config).expect("failed to create tts");
+    OfflineTts::create(&config).expect("failed to create TTS")
+}
 
-    let text = "Hello from Sherpa ONNX text to speech in Rust.";
-
-    // Generation config
+/// Synthesize speech from text. Returns `(samples, sample_rate)` or `None`
+/// if generation fails.
+pub fn synthesize(tts: &OfflineTts, text: &str, speed: f32) -> Option<(Vec<f32>, u32)> {
     let gen_config = GenerationConfig {
-        speed: 1.0,
+        speed,
         ..Default::default()
     };
 
-    // Generate audio
-    let audio = tts
-        .generate_with_config(text, &gen_config, None::<fn(&[f32], f32) -> bool>)
-        .expect("failed to generate audio");
+    tts.generate_with_config(text, &gen_config, None::<fn(&[f32], f32) -> bool>)
+        .map(|audio| (audio.samples().to_vec(), audio.sample_rate() as u32))
+}
 
-    // Get audio samples
-    let samples: Vec<f32> = audio.samples().to_vec();
+// ─── Standalone demo (called by the `tts` REPL command) ─────────────
 
-    // Open default audio device
-    let (_stream, stream_handle) =
-        OutputStream::try_default().expect("failed to open audio output");
+/// Generate and play a hardcoded sentence. This is the standalone `tts`
+/// command.
+pub fn speak() {
+    use crate::devices::speaker::{open_output, play_samples};
 
-    // Create sink
-    let sink = Sink::try_new(&stream_handle).expect("failed to create sink");
+    let tts = create_tts();
 
-    // Create source
-    let source = SamplesBuffer::new(
-        1, // mono
-        audio.sample_rate() as u32,
-        samples,
-    );
+    let text = "Hello from Sherpa ONNX text to speech in Rust.";
 
-    // Play
-    sink.append(source);
+    let (samples, sample_rate) = synthesize(&tts, text, 1.0).expect("failed to generate audio");
 
-    // Wait until finished
-    sink.sleep_until_end();
+    let (_stream, handle) = open_output();
+    play_samples(&handle, &samples, sample_rate);
 
     println!("Done speaking!");
 }

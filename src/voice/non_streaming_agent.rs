@@ -1,248 +1,57 @@
-use crate::stt::sherpa::to_mono;
-
 use futures::StreamExt;
+use rubato::Resampler;
 use rig::agent::MultiTurnStreamItem;
-use rig::client::{Client, CompletionClient, Nothing};
-use rig::providers::ollama;
 use rig::streaming::{StreamedAssistantContent, StreamingPrompt};
-
-use rodio::{OutputStream, Sink, buffer::SamplesBuffer};
-
-use sherpa_onnx::{
-    GenerationConfig, OfflineModelConfig, OfflineRecognizer, OfflineRecognizerConfig, OfflineTts,
-    OfflineTtsConfig, OfflineTtsModelConfig, OfflineTtsVitsModelConfig, OfflineWhisperModelConfig,
-    SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
-};
-
 use std::io::{self, Write};
+
+use crate::devices::mic::open_mic_stream;
+use crate::devices::resampler::create_resampler;
+use crate::devices::speaker::{open_output, play_samples};
+use crate::llm::rig::{create_ollama_client, create_voice_agent};
+use crate::stt::sherpa::{VadConfig, create_recognizer, create_vad, transcribe_audio};
+use crate::tts::sherpa::{create_tts, synthesize};
 
 const SAMPLE_RATE: i32 = 16000;
 const MIC_SAMPLE_RATE: u32 = 48000;
 const MIC_CHUNK_SIZE: usize = 960;
 
 pub async fn agent() {
-    // =========================================
-    // BUILD WHISPER RECOGNIZER
-    // =========================================
+    // ── Initialise components ────────────────────────────────────────
     println!("[agent] Initializing speech recognizer...");
-    println!(
-        "tokens path: {}",
-        crate::utils::model_path("whisper/tokens.txt")
-    );
+    let recognizer = create_recognizer();
 
-    println!(
-        "exists: {}",
-        std::path::Path::new(&crate::utils::model_path("whisper/tokens.txt")).exists()
-    );
-
-    println!("cwd: {:?}", std::env::current_dir().unwrap());
-
-    let whisper_config = OfflineWhisperModelConfig {
-        encoder: Some(crate::utils::model_path("whisper/encoder.int8.onnx")),
-        decoder: Some(crate::utils::model_path("whisper/decoder.int8.onnx")),
-        language: Some("en".to_string()),
-        task: Some("transcribe".to_string()),
-        ..Default::default()
-    };
-
-    let model_config = OfflineModelConfig {
-        whisper: whisper_config,
-        tokens: Some(crate::utils::model_path("whisper/tokens.txt")),
-        ..Default::default()
-    };
-
-    let recognizer_config = OfflineRecognizerConfig {
-        model_config,
-        ..Default::default()
-    };
-
-    let recognizer =
-        OfflineRecognizer::create(&recognizer_config).expect("failed to create recognizer");
-
-    // =========================================
-    // BUILD VAD
-    // =========================================
     println!("[agent] Initializing VAD...");
-
-    let silero_vad = SileroVadModelConfig {
-        model: Some(crate::utils::model_path("vad/silero.onnx")),
-
-        // More aggressive settings
+    let mut vad = create_vad(VadConfig {
         threshold: 0.7,
         min_silence_duration: 1.2,
         min_speech_duration: 0.4,
-
-        window_size: 512,
-        max_speech_duration: 20.0,
-    };
-
-    let vad_model = VadModelConfig {
-        silero_vad,
-        sample_rate: SAMPLE_RATE,
-        num_threads: 1,
-        provider: Some("cpu".to_string()),
-        debug: false,
         ..Default::default()
-    };
+    });
 
-    let mut vad = VoiceActivityDetector::create(&vad_model, 30.0).expect("failed to create VAD");
-
-    // =========================================
-    // BUILD RESAMPLER
-    // =========================================
     println!("[agent] Initializing resampler (48kHz -> 16kHz)...");
+    let mut resampler = create_resampler(MIC_SAMPLE_RATE, SAMPLE_RATE as u32, MIC_CHUNK_SIZE);
 
-    use rubato::{
-        Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
-    };
-
-    let resample_ratio = SAMPLE_RATE as f64 / MIC_SAMPLE_RATE as f64;
-
-    let sinc_params = SincInterpolationParameters {
-        sinc_len: 256,
-        f_cutoff: 0.95,
-        interpolation: SincInterpolationType::Linear,
-        oversampling_factor: 256,
-        window: WindowFunction::BlackmanHarris2,
-    };
-
-    let mut resampler =
-        SincFixedIn::<f32>::new(resample_ratio, 2.0, sinc_params, MIC_CHUNK_SIZE, 1)
-            .expect("failed to create resampler");
-
-    // =========================================
-    // BUILD TTS
-    // =========================================
     println!("[agent] Initializing TTS...");
+    let tts = create_tts();
 
-    let vits = OfflineTtsVitsModelConfig {
-        model: Some(crate::utils::model_path("tts/en-lessac-medium.onnx")),
-        tokens: Some(crate::utils::model_path("tts/tokens.txt")),
-        data_dir: Some(crate::utils::model_path("tts/espeak-ng-data")),
-        ..Default::default()
-    };
-
-    let tts_model = OfflineTtsModelConfig {
-        vits,
-        provider: Some("cpu".to_string()),
-        num_threads: 1,
-        debug: false,
-        ..Default::default()
-    };
-
-    let tts_config = OfflineTtsConfig {
-        model: tts_model,
-        max_num_sentences: 1,
-        rule_fsts: Some("".to_string()),
-        rule_fars: Some("".to_string()),
-        silence_scale: 0.2,
-    };
-
-    let tts = OfflineTts::create(&tts_config).expect("failed to create TTS");
-
-    // =========================================
-    // BUILD LLM AGENT
-    // =========================================
     println!("[agent] Connecting to Ollama...");
+    let client = create_ollama_client().expect("failed to build Ollama client");
+    let llm_agent = create_voice_agent(&client);
 
-    let client = Client::<ollama::OllamaExt>::builder()
-        .api_key(Nothing)
-        .base_url("http://localhost:11434")
-        .build()
-        .expect("failed to build Ollama client");
+    println!("[agent] Opening microphone...");
+    let (_stream, rx) = open_mic_stream().expect("failed to open microphone");
 
-    let llm_agent = client
-        .agent("llama3.2")
-        .preamble(
-            "You are a helpful voice assistant. \
-             Keep responses concise and conversational.",
-        )
-        .build();
-
-    // =========================================
-    // MICROPHONE
-    // =========================================
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
-    let (_stream, rx) = {
-        let host = cpal::default_host();
-
-        let device = host.default_input_device().expect("no microphone found");
-
-        println!("[agent] Using microphone: {}", device.name().unwrap());
-
-        let supported_config = device.default_input_config().unwrap();
-
-        let sample_format = supported_config.sample_format();
-
-        let config: cpal::StreamConfig = supported_config.into();
-
-        println!(
-            "[agent] Sample rate: {}Hz, Channels: {}",
-            config.sample_rate.0, config.channels
-        );
-
-        let channels = config.channels as usize;
-
-        let (tx, rx) = crossbeam_channel::unbounded::<Vec<f32>>();
-
-        let err_fn = |err| eprintln!("[agent] stream error: {}", err);
-
-        let stream = match sample_format {
-            cpal::SampleFormat::F32 => device
-                .build_input_stream(
-                    &config,
-                    move |data: &[f32], _| {
-                        let mono = to_mono(data, channels);
-
-                        tx.send(mono).ok();
-                    },
-                    err_fn,
-                    None,
-                )
-                .unwrap(),
-
-            cpal::SampleFormat::I16 => device
-                .build_input_stream(
-                    &config,
-                    move |data: &[i16], _| {
-                        let samples: Vec<f32> = data.iter().map(|s| *s as f32 / 32768.0).collect();
-
-                        let mono = to_mono(&samples, channels);
-
-                        tx.send(mono).ok();
-                    },
-                    err_fn,
-                    None,
-                )
-                .unwrap(),
-
-            _ => panic!("unsupported sample format"),
-        };
-
-        stream.play().unwrap();
-
-        (stream, rx)
-    };
-
-    // =========================================
-    // MAIN LOOP
-    // =========================================
+    // ── Main loop ────────────────────────────────────────────────────
     println!("[agent] Ready. Listening for speech...\n");
 
     let mut mic_buffer: Vec<f32> = Vec::new();
-
     let mut current_speech: Vec<f32> = Vec::new();
-
     let mut was_speaking = false;
-
-    // Prevent microphone from hearing TTS
     let mut is_speaking = false;
 
     loop {
         let chunk = rx.recv().expect("failed to receive audio");
 
-        // Ignore microphone while TTS is speaking
         if is_speaking {
             continue;
         }
@@ -252,76 +61,49 @@ pub async fn agent() {
         while mic_buffer.len() >= MIC_CHUNK_SIZE {
             let input_chunk: Vec<f32> = mic_buffer.drain(..MIC_CHUNK_SIZE).collect();
 
-            // =====================================
-            // RESAMPLE 48kHz -> 16kHz
-            // =====================================
+            // Resample 48kHz -> 16kHz
             let resampled = resampler
                 .process(&vec![input_chunk], None)
                 .expect("resampling failed");
-
             let chunk_16k = &resampled[0];
 
-            // =====================================
-            // FEED INTO VAD
-            // =====================================
+            // Feed into VAD
             vad.accept_waveform(chunk_16k);
 
-            // Pull detected speech segments
             while !vad.is_empty() {
                 let segment = vad.front().unwrap();
-
                 current_speech.extend_from_slice(segment.samples());
-
                 was_speaking = true;
-
                 vad.pop();
             }
 
-            // =====================================
-            // PROCESS AFTER SILENCE
-            // =====================================
+            // Process after silence
             if was_speaking && vad.is_empty() && current_speech.len() > SAMPLE_RATE as usize {
-                println!("\n[agent] 🎤 Speech detected, transcribing...");
+                println!("\n[agent] Speech detected, transcribing...");
 
-                // =================================
-                // TRANSCRIBE
-                // =================================
-                let mut stream = recognizer.create_stream();
-
-                stream.accept_waveform(SAMPLE_RATE, &current_speech);
-
-                recognizer.decode(&mut stream);
-
-                let transcript = match stream.get_result() {
-                    Some(r) => r.text.trim().to_string(),
-                    None => String::new(),
+                // ── Transcribe ───────────────────────────────────────
+                let transcript = match transcribe_audio(&recognizer, &current_speech, SAMPLE_RATE) {
+                    Some(t) => t,
+                    None => {
+                        println!("[agent] (empty transcript, skipping)");
+                        println!("\n[agent] Listening...");
+                        current_speech.clear();
+                        was_speaking = false;
+                        continue;
+                    }
                 };
 
                 current_speech.clear();
                 was_speaking = false;
 
-                // Skip empty transcripts
-                if transcript.is_empty() || transcript == "[inaudible]" {
-                    println!("[agent] (empty transcript, skipping)");
+                println!("[agent] Transcript: \"{}\"", transcript);
 
-                    println!("\n[agent] Listening...");
-
-                    continue;
-                }
-
-                println!("[agent] 📝 Transcript: \"{}\"", transcript);
-
-                // =================================
-                // LLM
-                // =================================
-                println!("[agent] 🤖 Sending to LLM...");
-
+                // ── LLM ──────────────────────────────────────────────
+                println!("[agent] Sending to LLM...");
                 print!("[agent] Response: ");
-
                 io::stdout().flush().unwrap();
 
                 let mut response_text = String::new();
-
                 let mut llm_stream = llm_agent.stream_prompt(&transcript).await;
 
                 while let Some(item) = llm_stream.next().await {
@@ -330,17 +112,12 @@ pub async fn agent() {
                             StreamedAssistantContent::Text(t),
                         )) => {
                             print!("{}", t.text);
-
                             io::stdout().flush().unwrap();
-
                             response_text.push_str(&t.text);
                         }
-
                         Ok(_) => {}
-
                         Err(e) => {
                             eprintln!("\n[agent] LLM error: {}", e);
-
                             break;
                         }
                     }
@@ -350,56 +127,29 @@ pub async fn agent() {
 
                 if response_text.trim().is_empty() {
                     println!("[agent] (empty LLM response)");
-
                     println!("\n[agent] Listening...");
-
                     continue;
                 }
 
-                // =================================
-                // TTS
-                // =================================
-                println!("[agent] 🔊 Speaking response...");
-
+                // ── TTS ──────────────────────────────────────────────
+                println!("[agent] Speaking response...");
                 is_speaking = true;
 
-                let gen_config = GenerationConfig {
-                    speed: 1.0,
-                    ..Default::default()
-                };
+                if let Some((samples, sample_rate)) = synthesize(&tts, &response_text, 1.0) {
+                    let (_out_stream, handle) = open_output();
+                    play_samples(&handle, &samples, sample_rate);
+                } else {
+                    eprintln!("[agent] TTS generation failed");
+                }
 
-                let audio = tts
-                    .generate_with_config(
-                        &response_text,
-                        &gen_config,
-                        None::<fn(&[f32], f32) -> bool>,
-                    )
-                    .expect("TTS generation failed");
-
-                let (_out_stream, stream_handle) =
-                    OutputStream::try_default().expect("failed to open audio output");
-
-                let sink = Sink::try_new(&stream_handle).expect("failed to create sink");
-
-                let source =
-                    SamplesBuffer::new(1, audio.sample_rate() as u32, audio.samples().to_vec());
-
-                sink.append(source);
-
-                // Wait until speech finishes
-                sink.sleep_until_end();
-
-                // Re-enable microphone
                 is_speaking = false;
 
-                // Clear old audio
+                // ── Cleanup ──────────────────────────────────────────
                 mic_buffer.clear();
                 current_speech.clear();
-
                 vad.clear();
 
-                println!("[agent] ✅ Done speaking.");
-
+                println!("[agent] Done speaking.");
                 println!("\n[agent] Listening...");
             }
         }

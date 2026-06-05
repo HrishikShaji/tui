@@ -8,6 +8,8 @@ use llama_cpp_2::{
 };
 use std::io::{self, BufRead, Write};
 
+use crate::utils::model_path;
+
 const STOP_PATTERNS: &[&str] = &[
     "\nUser:",
     "\nUser\n",
@@ -23,8 +25,34 @@ fn find_stop_cutoff(response: &str) -> Option<usize> {
         .min()
 }
 
-/// Returns the generated response as a String (and streams it to stdout)
-fn generate_response(
+// ─── Builder functions ───────────────────────────────────────────────
+
+/// Initialise the llama.cpp backend and load the local GGUF model.
+/// Returns `(backend, model)` for use by callers that want to manage
+/// context creation themselves.
+pub fn load_model() -> (LlamaBackend, LlamaModel) {
+    unsafe {
+        std::env::set_var("LLAMA_CPP_LOG_LEVEL", "0");
+    }
+
+    let log_options = LogOptions::default().with_logs_enabled(false);
+    send_logs_to_tracing(log_options);
+
+    let backend = LlamaBackend::init().expect("failed to init llama backend");
+
+    let model_params = LlamaModelParams::default();
+    let path = model_path("llm/llama-3.2.gguf");
+    let model =
+        LlamaModel::load_from_file(&backend, &path, &model_params).expect("failed to load model");
+
+    (backend, model)
+}
+
+// ─── Generation ──────────────────────────────────────────────────────
+
+/// Generate a response by feeding `prompt` into the model, streaming
+/// tokens to stdout. Returns the full generated text.
+pub fn generate_response(
     ctx: &mut llama_cpp_2::context::LlamaContext,
     model: &LlamaModel,
     prompt: &str,
@@ -71,7 +99,6 @@ fn generate_response(
 
         if let Some(cutoff) = find_stop_cutoff(&response) {
             let clean = response[..cutoff].to_string();
-            // Print only the newly added portion up to the cutoff
             let already_printed = response.len() - token_str.len();
             if cutoff > already_printed {
                 print!("{}", &clean[already_printed..]);
@@ -97,7 +124,9 @@ fn generate_response(
     response
 }
 
-fn build_prompt(history: &[(String, String)], user_input: &str) -> String {
+/// Build a multi-turn prompt string from conversation history and the
+/// current user input.
+pub fn build_prompt(history: &[(String, String)], user_input: &str) -> String {
     let mut prompt = String::new();
     for (user, assistant) in history {
         prompt.push_str(&format!("User: {user}\nAssistant: {assistant}\n"));
@@ -106,19 +135,11 @@ fn build_prompt(history: &[(String, String)], user_input: &str) -> String {
     prompt
 }
 
+// ─── Standalone REPL (called by the `llm` REPL command) ─────────────
+
+/// Interactive local LLM chat loop. This is the standalone `llm` command.
 pub fn run_local_agent() {
-    unsafe {
-        std::env::set_var("LLAMA_CPP_LOG_LEVEL", "0");
-    }
-
-    let log_options = LogOptions::default().with_logs_enabled(false);
-    send_logs_to_tracing(log_options);
-
-    let backend = LlamaBackend::init().expect("Failed to init llama backend");
-
-    let model_params = LlamaModelParams::default();
-    let model = LlamaModel::load_from_file(&backend, r"./models/llm/llama-3.2.gguf", &model_params)
-        .expect("Failed to load model");
+    let (backend, model) = load_model();
 
     println!("Model loaded. Type your message and press Enter (Ctrl+C or 'exit' to quit):\n");
 
